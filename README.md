@@ -10,11 +10,7 @@
   <b>不连电脑，不连服务器，不是网页套壳。引擎就跑在 App 里，每个页面都用 SwiftUI 重写。</b>
 </p>
 
-<p align="center">
-  <a href="https://testflight.apple.com/join/2SCftb2M"><img src="https://img.shields.io/badge/TestFlight-%E5%8A%A0%E5%85%A5%E5%85%AC%E6%B5%8B-0D96F6?style=for-the-badge&logo=apple&logoColor=white" alt="在 TestFlight 加入公测"></a>
-</p>
-
-<p align="center">如果你也想把大肥鱼装进口袋，点个 ⭐ 支持一下吧。</p>
+<p align="center">如果你也想把大肥鱼装进口袋，<a href="https://testflight.apple.com/join/2SCftb2M"><b>加入 TestFlight 公测</b></a>，再点个 ⭐ 支持一下吧。</p>
 
 <p align="center"><a href="README.en.md">English</a></p>
 

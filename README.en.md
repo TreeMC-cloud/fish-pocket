@@ -10,11 +10,7 @@
   <b>No computer. No server. Not a web wrapper. The engine runs inside the app, and every screen is rebuilt in SwiftUI.</b>
 </p>
 
-<p align="center">
-  <a href="https://testflight.apple.com/join/2SCftb2M"><img src="https://img.shields.io/badge/TestFlight-Join%20the%20beta-0D96F6?style=for-the-badge&logo=apple&logoColor=white" alt="Join the beta on TestFlight"></a>
-</p>
-
-<p align="center">Want an agent in your pocket too? A ⭐ helps.</p>
+<p align="center">Want an agent in your pocket too? <a href="https://testflight.apple.com/join/2SCftb2M"><b>Join the TestFlight beta</b></a>, and a ⭐ helps.</p>
 
 <p align="center"><a href="README.md">中文</a></p>
 
