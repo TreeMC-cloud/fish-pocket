@@ -1,0 +1,54 @@
+{
+ "title": "统计仓库提交",
+ "scenarios": {
+  "写一个小脚本": [
+   {
+    "delay": 500,
+    "cps": 45,
+    "say": "我先把示例仓库克隆下来。",
+    "tool": "bash",
+    "args": {
+     "description": "克隆仓库",
+     "command": "git clone https://github.com/octocat/Hello-World"
+    }
+   },
+   {
+    "delay": 500,
+    "cps": 45,
+    "say": "写个脚本，按年份统计提交。",
+    "tool": "write",
+    "args": {
+     "file_path": "commits-by-year.mjs",
+     "content": "import { execSync } from 'node:child_process';\n\nconst repo = process.argv[2] ?? '.';\nconst log = execSync(`git -C ${repo} log --format=%ad --date=short`, { encoding: 'utf8' });\n\nconst years = {};\nfor (const date of log.trim().split('\\n')) {\n  const year = date.slice(0, 4);\n  years[year] = (years[year] ?? 0) + 1;\n}\nconsole.table(years);\n"
+    }
+   },
+   {
+    "delay": 500,
+    "cps": 45,
+    "say": "跑一下看看结果。",
+    "tool": "bash",
+    "args": {
+     "description": "运行脚本",
+     "command": "node commits-by-year.mjs Hello-World"
+    }
+   },
+   {
+    "delay": 500,
+    "cps": 45,
+    "say": "结果对了。这个仓库已经用完，清理一下。",
+    "tool": "bash",
+    "args": {
+     "description": "清理临时仓库",
+     "command": "rm -rf Hello-World",
+     "sandbox_permissions": "danger-full-access",
+     "justification": "删除临时仓库 Hello-World，脚本 commits-by-year.mjs 会保留。"
+    }
+   },
+   {
+    "delay": 500,
+    "cps": 40,
+    "say": "搞定了。`Hello-World` 一共 3 次提交：\n\n| 年份 | 提交 |\n|---|---|\n| 2011 | 2 |\n| 2012 | 1 |\n\n脚本已经留在工作区，换个仓库也能用：\n\n```bash\nnode commits-by-year.mjs <仓库路径>\n```\n\n要不要顺手按月份再细分一下？"
+   }
+  ]
+ }
+}

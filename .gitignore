@@ -1,0 +1,11 @@
+.DS_Store
+# Generated / downloaded
+app/build/
+app/DshIOS.xcodeproj/
+vendor/
+engine/node_modules/
+engine/.dsh-home-host/
+# Xcode
+DerivedData/
+*.xcuserstate
+xcuserdata/

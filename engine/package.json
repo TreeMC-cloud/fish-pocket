@@ -1,0 +1,17 @@
+{
+  "name": "dsh-ios-engine",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@deepseek-ai/dsh": "0.2.1-rc.4",
+    "just-bash": "3.6.0",
+    "node-addon-require-builtin-ios-arm64": "file:./shims/node-addon-require-builtin-ios-arm64",
+    "pnpm": "11.28.5"
+  },
+  "overrides": {
+    "zod": "4.6.7"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
+}

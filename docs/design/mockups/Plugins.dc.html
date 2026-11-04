@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>插件</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Noto+Sans+SC:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#0C0C0D}a:hover{color:#0C0C0D}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #FFFFFF; color: #0C0C0D; font-family: Inter, 'Noto Sans SC', system-ui, sans-serif; display: flex; flex-direction: column; overflow: hidden">
+
+  <header style="padding: 54px 8px 0; display: flex; align-items: center">
+    <a href="Settings.dc.html" aria-label="返回设置" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0C0C0D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg>
+    </a>
+    <span style="flex: 1; text-align: center; font-size: 16px; font-weight: 600">插件</span>
+    <button aria-label="添加插件" style="all: unset; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; cursor: pointer">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0C0C0D" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+    </button>
+  </header>
+
+  <div style="margin: 16px 12px 0; display: flex; align-items: center; gap: 12px; padding: 12px 12px 12px 18px; border-radius: 22px; border: 1px solid #E5E5E8">
+    <span style="flex: 1; font-size: 14px; color: #3A3A3F">1 项改动，重启引擎后生效</span>
+    <button style="all: unset; height: 34px; padding: 0 14px; border-radius: 17px; background: #0C0C0D; color: #FFFFFF; font-size: 14px; font-weight: 600; cursor: pointer">重启</button>
+  </div>
+
+  <main style="flex: 1; padding: 20px 12px 0; display: flex; flex-direction: column">
+    <div style="background: #F5F5F6; border-radius: 22px; padding: 4px 0">
+      <sc-for list="{{plugins}}" as="p" hint-placeholder-count="6">
+        <div style="display: flex; align-items: center; gap: 16px; padding: 13px 18px">
+          <span style="display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0">
+            <span style="font-size: 16px; color: {{p.nameColor}}">{{p.name}}</span>
+            <span style="font-size: 13px; color: #6B6B72">{{p.desc}}</span>
+          </span>
+          <span role="switch" aria-checked="{{p.onText}}" aria-disabled="{{p.disabledText}}" aria-label="{{p.name}}" style="width: 48px; height: 28px; border-radius: 14px; background: {{p.track}}; position: relative; flex: none">
+            <span style="position: absolute; top: 3px; left: {{p.knobLeft}}; width: 22px; height: 22px; border-radius: 11px; background: {{p.knob}}"></span>
+          </span>
+        </div>
+      </sc-for>
+    </div>
+    <div style="font-size: 13px; color: #6B6B72; padding: 14px 18px 0; line-height: 1.6">iOS 执行层（subprocess-ios、sandbox-ios、ios-host）始终启用。</div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const row = (name, desc, on, disabled) => ({
+      name, desc,
+      onText: on ? 'true' : 'false',
+      disabledText: disabled ? 'true' : 'false',
+      track: on ? '#0C0C0D' : '#E5E5E8',
+      knob: on ? '#FFFFFF' : '#A3A3AA',
+      knobLeft: on ? '23px' : '3px',
+      nameColor: disabled ? '#6B6B72' : '#0C0C0D'
+    });
+    return {
+      plugins: [
+        row('子智能体', '把任务拆给并行的子智能体', true, false),
+        row('后台任务', '长命令在后台运行', true, false),
+        row('计划', '先出计划，确认后再执行', true, false),
+        row('技能', '按需加载工作区里的技能', true, false),
+        row('密钥遮罩', '在对话和日志里隐藏密钥', false, false),
+        row('浏览器', 'iOS 上不可用', false, true)
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

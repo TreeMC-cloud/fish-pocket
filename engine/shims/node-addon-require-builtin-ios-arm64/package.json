@@ -1,0 +1,8 @@
+{
+  "name": "node-addon-require-builtin-ios-arm64",
+  "version": "0.1.9",
+  "private": true,
+  "description": "iOS stand-in for the node-addon-require-builtin prebuilt: the app starts Node with --expose-internals, so Node's own require reaches internal modules without a native addon.",
+  "main": "./index.js",
+  "license": "MIT"
+}

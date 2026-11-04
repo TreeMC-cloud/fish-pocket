@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 452" role="img" aria-label="Native SwiftUI interface → DSH engine">
+<style>text{font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Noto Sans CJK SC','Microsoft YaHei','Segoe UI',Helvetica,Arial,sans-serif;fill:#1f2328}.m{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}</style>
+<defs><marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#59636e"/></marker></defs>
+<rect x="10" y="10" width="840" height="432" rx="18" fill="none" stroke="#afb8c1" stroke-width="1.5" stroke-dasharray="6 6"/>
+<text x="40" y="40" font-size="14" style="fill:#59636e">The app on your iPhone</text>
+<rect x="40" y="56" width="780" height="64" rx="12" fill="#0969da"/>
+<text x="430.0" y="95" text-anchor="middle" font-size="20" font-weight="600" style="fill:#ffffff">Native SwiftUI interface</text>
+<path d="M430.0 122V158" stroke="#59636e" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="444.0" y="145" font-size="14" style="fill:#59636e">Local HTTP (DSH Web protocol)</text>
+<rect x="40" y="162" width="780" height="84" rx="12" fill="#ddf4ff" stroke="#54aeff" stroke-width="1.5"/>
+<text x="430.0" y="198" text-anchor="middle" font-size="20" font-weight="600">DSH engine</text>
+<text x="430.0" y="225" text-anchor="middle" font-size="15" style="fill:#59636e">Node 24 (jitless, embedded with nodejs-mobile)</text>
+<path d="M430.0 246V268M131.5 268H728.5" stroke="#59636e" stroke-width="1.5" fill="none"/>
+<path d="M131.5 268V290" stroke="#59636e" stroke-width="1.5" marker-end="url(#a)"/>
+<rect x="40" y="294" width="183" height="124" rx="12" fill="#f6f8fa" stroke="#d1d9e0" stroke-width="1.5"/>
+<text class="m" x="131.5" y="330" text-anchor="middle" font-size="15" font-weight="600">bash</text>
+<text x="131.5" y="366" text-anchor="middle" font-size="15">just-bash</text>
+<text x="131.5" y="392" text-anchor="middle" font-size="13" style="fill:#59636e">Interpreter in TypeScript</text>
+<path d="M330.5 268V290" stroke="#59636e" stroke-width="1.5" marker-end="url(#a)"/>
+<rect x="239" y="294" width="183" height="124" rx="12" fill="#f6f8fa" stroke="#d1d9e0" stroke-width="1.5"/>
+<text class="m" x="330.5" y="330" text-anchor="middle" font-size="15" font-weight="600">node / pnpm</text>
+<text x="330.5" y="366" text-anchor="middle" font-size="15">Worker threads</text>
+<text x="330.5" y="392" text-anchor="middle" font-size="13" style="fill:#59636e">In the same process</text>
+<path d="M529.5 268V290" stroke="#59636e" stroke-width="1.5" marker-end="url(#a)"/>
+<rect x="438" y="294" width="183" height="124" rx="12" fill="#f6f8fa" stroke="#d1d9e0" stroke-width="1.5"/>
+<text class="m" x="529.5" y="330" text-anchor="middle" font-size="15" font-weight="600">git</text>
+<text x="529.5" y="366" text-anchor="middle" font-size="15">Static libgit2</text>
+<text x="529.5" y="392" text-anchor="middle" font-size="13" style="fill:#59636e">Output matches real git</text>
+<path d="M728.5 268V290" stroke="#59636e" stroke-width="1.5" marker-end="url(#a)"/>
+<rect x="637" y="294" width="183" height="124" rx="12" fill="#f6f8fa" stroke="#d1d9e0" stroke-width="1.5"/>
+<text class="m" x="728.5" y="330" text-anchor="middle" font-size="15" font-weight="600">native addons</text>
+<text x="728.5" y="366" text-anchor="middle" font-size="15">Pure JS stand-ins</text>
+<text x="728.5" y="392" text-anchor="middle" font-size="13" style="fill:#59636e">Replace native modules</text>
+</svg>

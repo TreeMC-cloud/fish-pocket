@@ -1,0 +1,5 @@
+src/frames/
+src/plates/
+src/out/
+src/capture/mock.log*
+teaser-*.gif

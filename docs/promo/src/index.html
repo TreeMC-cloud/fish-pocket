@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>Fish Pocket promo</title>
+<style>
+  :root {
+    --ink: #0c0c0d; --page: #f5f5f6; --on-dark: #f2f2f3; --muted: #6b6b72; --muted-dark: #9a9aa0; --run: #3dd68c;
+    --sans: "PingFang SC", -apple-system, "SF Pro Display", "Helvetica Neue", Inter, "Noto Sans SC", sans-serif;
+    --mono: "SF Mono", ui-monospace, Menlo, "JetBrains Mono", "Noto Sans SC", monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1920px; height: 1080px; background: #000; overflow: hidden; }
+  #stage { position: relative; width: 1920px; height: 1080px; overflow: hidden; font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+  .scene { position: absolute; inset: 0; overflow: hidden; display: none; }
+
+  /* Captions */
+  .h { position: absolute; font-weight: 600; letter-spacing: -0.015em; line-height: 1.16; white-space: pre-line; will-change: transform, opacity; }
+  .sub { position: absolute; font-weight: 400; line-height: 1.5; white-space: pre-line; }
+  html[lang=en] .h { letter-spacing: -0.025em; }
+
+  /* Phone */
+  .phone { position: absolute; left: 0; top: 0; transform-origin: 50% 50%; will-change: transform; }
+  .phone .body { position: absolute; inset: 0; background: linear-gradient(145deg, #3a3a3e, #17171a 45%, #2c2c30); box-shadow: 0 50px 110px rgba(0, 0, 0, .34), 0 12px 30px rgba(0, 0, 0, .22), inset 0 0 0 2px rgba(255, 255, 255, .16); }
+  .phone .screen { position: absolute; overflow: hidden; background: #000; }
+  .phone img { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .tap { position: absolute; border-radius: 50%; pointer-events: none; display: none; }
+  .plate { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; z-index: 5; }
+
+  /* Three lines */
+  .line3 { position: absolute; left: 170px; font-weight: 600; font-size: 118px; letter-spacing: -0.02em; color: var(--ink); }
+
+  /* End card */
+  #urlpill { position: absolute; font: 500 36px var(--mono); color: var(--ink); background: var(--on-dark); padding: 18px 36px; border-radius: 999px; white-space: nowrap; }
+  .fine { position: absolute; left: 0; right: 0; text-align: center; font-size: 20px; line-height: 1.6; color: #8c8c93; white-space: pre-line; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <section class="scene" id="s2" style="background:var(--ink)">
+    <div id="s1g" style="position:absolute;left:170px;top:286px">
+      <img src="mascot.png" style="display:block;width:150px;height:150px;border-radius:34px">
+      <div id="s1t" style="margin-top:42px;font-weight:600;font-size:124px;line-height:1.1;letter-spacing:-.03em;color:var(--on-dark)"></div>
+      <div id="s1s" style="margin-top:24px;font-size:38px;line-height:1.4;color:var(--muted-dark);white-space:pre-line"></div>
+    </div>
+    <div class="h" id="s2t" style="left:170px;top:340px;font-size:96px;color:var(--on-dark)"></div>
+    <div class="sub" id="s2s" style="left:174px;top:610px;width:760px;font-size:36px;color:var(--muted-dark)"></div>
+  </section>
+
+  <section class="scene" id="s4" style="background:var(--page)">
+    <div class="h" id="s4a" style="left:170px;top:400px;width:860px;font-size:92px;color:var(--ink)"></div>
+    <div class="h" id="s4b" style="left:170px;top:400px;width:860px;font-size:92px;color:var(--ink)"></div>
+    <div class="h" id="s4c" style="left:170px;top:400px;width:860px;font-size:92px;color:var(--ink)"></div>
+    <div class="h" id="s4d" style="left:170px;top:400px;width:860px;font-size:92px;color:var(--ink)"></div>
+  </section>
+
+  <section class="scene" id="s5" style="background:var(--ink)">
+    <div class="h" id="s5t" style="left:980px;top:238px;width:800px;font-size:84px;color:var(--on-dark)"></div>
+    <div id="s5v" style="position:absolute;left:984px;top:456px;font:600 96px var(--mono);color:var(--run);white-space:pre"></div>
+    <div id="s5g" style="position:absolute;left:986px;top:586px;font:500 30px var(--mono);color:var(--muted-dark);white-space:pre"></div>
+    <div class="sub" id="s5s" style="left:984px;top:668px;width:800px;font-size:36px;color:#c8c8ce"></div>
+  </section>
+
+  <section class="scene" id="s6" style="background:var(--page)">
+    <div class="h" id="s6t" style="left:0;right:0;top:56px;text-align:center;font-size:76px;color:var(--ink)"></div>
+    <div class="sub" id="s6s" style="left:0;right:0;top:158px;text-align:center;font-size:34px;color:var(--muted)"></div>
+  </section>
+
+  <section class="scene" id="s7" style="background:var(--ink)">
+    <div class="h" id="s7t" style="left:1090px;top:390px;width:700px;font-size:84px;color:var(--on-dark)"></div>
+  </section>
+
+  <section class="scene" id="s8" style="background:var(--page)">
+    <div class="line3" id="l1" style="top:262px"></div>
+    <div class="line3" id="l2" style="top:462px"></div>
+    <div class="line3" id="l3" style="top:662px"></div>
+  </section>
+
+  <section class="scene" id="s9" style="background:var(--ink)">
+    <img id="s9m" src="mascot.png" style="position:absolute;left:300px;top:190px;width:500px;height:500px;border-radius:110px;box-shadow:0 40px 90px rgba(0,0,0,.5)">
+    <div class="h" id="s9t" style="left:880px;top:216px;font-size:132px;color:var(--on-dark);letter-spacing:-.03em"></div>
+    <div class="sub" id="s9s" style="left:884px;top:386px;font-size:38px;color:var(--muted-dark)"></div>
+    <div id="urlpill" style="left:884px;top:486px"></div>
+    <div class="sub" id="s9o" style="left:886px;top:606px;font-size:30px;color:var(--muted-dark)"></div>
+    <div class="fine" id="s9f" style="top:820px"></div>
+  </section>
+</div>
+
+<script src="promo.js"></script>
+</body>
+</html>

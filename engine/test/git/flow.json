@@ -1,0 +1,772 @@
+[
+ {
+  "git": [
+   "init",
+   "-q",
+   "--bare",
+   "remote.git"
+  ]
+ },
+ {
+  "git": [
+   "clone",
+   "remote.git",
+   "work"
+  ]
+ },
+ {
+  "sh": "cd work && echo one > a.txt && echo base > m.txt"
+ },
+ {
+  "git": [
+   "add",
+   "."
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "commit",
+   "-m",
+   "init"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "push"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "push",
+   "-u",
+   "origin",
+   "main"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "status"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "branch",
+   "-vv"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "remote",
+   "-v"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "clone",
+   "remote.git",
+   "other"
+  ]
+ },
+ {
+  "sh": "cd other && echo two >> a.txt"
+ },
+ {
+  "git": [
+   "commit",
+   "-am",
+   "from other"
+  ],
+  "cwd": "other"
+ },
+ {
+  "git": [
+   "push"
+  ],
+  "cwd": "other",
+  "stderr": false
+ },
+ {
+  "git": [
+   "fetch"
+  ],
+  "cwd": "work",
+  "stderr": false
+ },
+ {
+  "git": [
+   "status"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "pull"
+  ],
+  "cwd": "work",
+  "stderr": false
+ },
+ {
+  "git": [
+   "log",
+   "--oneline"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "switch",
+   "-c",
+   "topic"
+  ],
+  "cwd": "work"
+ },
+ {
+  "sh": "cd work && echo topic > m.txt"
+ },
+ {
+  "git": [
+   "commit",
+   "-qam",
+   "topic change"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "switch",
+   "main"
+  ],
+  "cwd": "work"
+ },
+ {
+  "sh": "cd work && echo mainline > m.txt"
+ },
+ {
+  "git": [
+   "commit",
+   "-qam",
+   "main change"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "merge",
+   "topic"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "status"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "status",
+   "--short"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "diff",
+   "--name-only"
+  ],
+  "cwd": "work",
+  "skip": "git lists an unmerged path twice; libgit2 once"
+ },
+ {
+  "git": [
+   "merge",
+   "--abort"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "status",
+   "-s"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "merge",
+   "--no-edit",
+   "topic",
+   "-X",
+   "theirs"
+  ],
+  "cwd": "work",
+  "stderr": false
+ },
+ {
+  "sh": "cd work && echo dirty >> a.txt && echo untracked > u.txt"
+ },
+ {
+  "git": [
+   "stash"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "stash",
+   "list"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "status",
+   "-s"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "stash",
+   "pop"
+  ],
+  "cwd": "work",
+  "stderr": false,
+  "mask": "\\(([0-9a-f]{40})\\)"
+ },
+ {
+  "git": [
+   "status",
+   "-s"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "checkout",
+   "--",
+   "a.txt"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "status",
+   "-s"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "tag",
+   "-a",
+   "v1.0",
+   "-m",
+   "release"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "tag",
+   "-l"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "rev-parse",
+   "v1.0^{commit}"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "ls-remote",
+   "origin"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "worktree",
+   "add",
+   "../wt",
+   "-b",
+   "wtbranch"
+  ],
+  "cwd": "work",
+  "stderr": false
+ },
+ {
+  "git": [
+   "status",
+   "-s"
+  ],
+  "cwd": "wt"
+ },
+ {
+  "git": [
+   "log",
+   "--oneline",
+   "-1"
+  ],
+  "cwd": "wt"
+ },
+ {
+  "git": [
+   "rev-parse",
+   "--abbrev-ref",
+   "HEAD"
+  ],
+  "cwd": "wt"
+ },
+ {
+  "git": [
+   "worktree",
+   "list",
+   "--porcelain"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "worktree",
+   "remove",
+   "../wt"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "-c",
+   "core.hooksPath=/dev/null",
+   "-c",
+   "core.fsmonitor=false",
+   "check-ref-format",
+   "refs/heads/agent/w1"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "-c",
+   "core.hooksPath=/dev/null",
+   "-c",
+   "core.fsmonitor=false",
+   "rev-parse",
+   "--show-toplevel"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "-c",
+   "core.hooksPath=/dev/null",
+   "-c",
+   "core.fsmonitor=false",
+   "rev-parse",
+   "--verify",
+   "--end-of-options",
+   "HEAD^{commit}"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "-c",
+   "core.hooksPath=/dev/null",
+   "-c",
+   "core.fsmonitor=false",
+   "show-ref",
+   "--verify",
+   "--quiet",
+   "refs/heads/agent/w1"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "-c",
+   "core.hooksPath=/dev/null",
+   "-c",
+   "core.fsmonitor=false",
+   "--work-tree",
+   "<D>/work",
+   "worktree",
+   "add",
+   "--no-checkout",
+   "-b",
+   "agent/w1",
+   "--",
+   "<D>/pool/w1",
+   "HEAD"
+  ],
+  "cwd": "work",
+  "stderr": false
+ },
+ {
+  "git": [
+   "-c",
+   "core.hooksPath=/dev/null",
+   "-c",
+   "core.fsmonitor=false",
+   "config",
+   "--null",
+   "--name-only",
+   "--get-regexp",
+   "^filter\\."
+  ],
+  "cwd": "pool/w1"
+ },
+ {
+  "git": [
+   "-c",
+   "core.hooksPath=/dev/null",
+   "-c",
+   "core.fsmonitor=false",
+   "--work-tree",
+   "<D>/pool/w1",
+   "reset",
+   "--hard",
+   "--no-recurse-submodules",
+   "HEAD"
+  ],
+  "cwd": "pool/w1"
+ },
+ {
+  "git": [
+   "status",
+   "--short"
+  ],
+  "cwd": "pool/w1"
+ },
+ {
+  "git": [
+   "rev-parse",
+   "--abbrev-ref",
+   "HEAD"
+  ],
+  "cwd": "pool/w1"
+ },
+ {
+  "git": [
+   "ls-files"
+  ],
+  "cwd": "pool/w1"
+ },
+ {
+  "git": [
+   "worktree",
+   "remove",
+   "<D>/pool/w1"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "branch",
+   "-D",
+   "agent/w1"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "worktree",
+   "add",
+   "-q",
+   "-b",
+   "same-a",
+   "../x/same"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "worktree",
+   "add",
+   "-q",
+   "-b",
+   "same-b",
+   "../y/same"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "worktree",
+   "list",
+   "--porcelain"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "rev-parse",
+   "--abbrev-ref",
+   "HEAD"
+  ],
+  "cwd": "y/same"
+ },
+ {
+  "git": [
+   "worktree",
+   "add",
+   "-b",
+   "left-over",
+   "../x/same"
+  ],
+  "cwd": "work",
+  "stderr": false,
+  "ignoreExit": false,
+  "mask": "fatal:.*"
+ },
+ {
+  "git": [
+   "rev-parse",
+   "--verify",
+   "--quiet",
+   "refs/heads/left-over"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "worktree",
+   "remove",
+   "../x/same"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "worktree",
+   "remove",
+   "../y/same"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "branch",
+   "-D",
+   "same-a",
+   "same-b"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "worktree",
+   "add",
+   "../prune-wt"
+  ],
+  "cwd": "work",
+  "stderr": false
+ },
+ {
+  "git": [
+   "worktree",
+   "prune"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "worktree",
+   "remove"
+  ],
+  "cwd": "work",
+  "stderr": false
+ },
+ {
+  "git": [
+   "worktree",
+   "prune",
+   "stray"
+  ],
+  "cwd": "work",
+  "stderr": false
+ },
+ {
+  "sh": "rm -rf prune-wt"
+ },
+ {
+  "git": [
+   "worktree",
+   "prune"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "branch",
+   "-D",
+   "prune-wt"
+  ],
+  "cwd": "work",
+  "mask": "[0-9a-f]{7,}"
+ },
+ {
+  "git": [
+   "rev-parse",
+   "--show-toplevel",
+   "--absolute-git-dir",
+   "--git-path",
+   "objects"
+  ],
+  "cwd": "work"
+ },
+ {
+  "sh": "cd work && mkdir -p ../scratch/objects && cp .git/index ../scratch/index && echo snap > snap.txt"
+ },
+ {
+  "git": [
+   "add",
+   "--all",
+   "--ignore-errors"
+  ],
+  "cwd": "work",
+  "env": "snap"
+ },
+ {
+  "git": [
+   "write-tree"
+  ],
+  "cwd": "work",
+  "env": "snap"
+ },
+ {
+  "git": [
+   "status",
+   "-s"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "diff-tree",
+   "-r",
+   "-M",
+   "-z",
+   "--numstat",
+   "HEAD^{tree}",
+   "HEAD~1^{tree}"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "ls-files",
+   "-z",
+   "--stage"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "ls-tree",
+   "-z",
+   "-l",
+   "HEAD",
+   "--",
+   "a.txt"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "check-ignore",
+   "-z",
+   "--stdin"
+  ],
+  "cwd": "work",
+  "stdin": "a.txt\u0000u.txt\u0000"
+ },
+ {
+  "git": [
+   "check-ignore",
+   "--",
+   "a.txt"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "merge-base",
+   "--",
+   "HEAD",
+   "HEAD~1"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "tag",
+   "--",
+   "dashed"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "branch",
+   "--",
+   "dashed-b"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "mv",
+   "--",
+   "a.txt",
+   "a2.txt"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "mv",
+   "--",
+   "a2.txt",
+   "a.txt"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "branch",
+   "-D",
+   "topic"
+  ],
+  "cwd": "work"
+ },
+ {
+  "git": [
+   "log",
+   "--graph",
+   "--oneline",
+   "-3"
+  ],
+  "cwd": "work",
+  "stderr": false,
+  "skip": "--graph draws no lanes yet"
+ },
+ {
+  "git": [
+   "show",
+   "v1.0",
+   "--stat"
+  ],
+  "cwd": "work"
+ }
+]

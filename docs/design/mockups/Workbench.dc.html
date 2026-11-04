@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>工作台</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;family=Noto+Sans+SC:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#0C0C0D}a:hover{color:#0C0C0D}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #FFFFFF; color: #0C0C0D; font-family: Inter, 'Noto Sans SC', system-ui, sans-serif; display: flex; flex-direction: column; overflow: hidden">
+
+  <header style="padding: 54px 8px 0 20px; display: flex; align-items: center">
+    <div role="tablist" aria-label="工作台视图" style="flex: 1; display: flex; gap: 4px">
+      <sc-for list="{{tabs}}" as="t" hint-placeholder-count="4">
+        <button role="tab" aria-selected="{{t.selected}}" onClick="{{t.pick}}" style="all: unset; height: 36px; padding: 0 14px; border-radius: 18px; font-size: 15px; cursor: pointer; font-weight: {{t.weight}}; color: {{t.color}}; background: {{t.bg}}">{{t.label}}</button>
+      </sc-for>
+    </div>
+    <a href="Conversation.dc.html" aria-label="关闭" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0C0C0D" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"></path></svg>
+    </a>
+  </header>
+
+  <sc-if value="{{isTerminal}}" hint-placeholder-val="{{true}}">
+    <div style="flex: 1; margin: 16px 12px 30px; background: #F5F5F6; border-radius: 28px; display: flex; flex-direction: column; overflow: hidden">
+      <div style="flex: 1; padding: 22px 20px; font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 1.8; color: #1C1C1F">
+        <div><span style="color: #A3A3AA">$</span> node --version</div>
+        <div style="color: #6B6B72">v24.4.0</div>
+        <div style="height: 10px"></div>
+        <div><span style="color: #A3A3AA">$</span> git status -s</div>
+        <div style="color: #6B6B72">M boot.mjs</div>
+        <div style="color: #6B6B72">M runtime/shell.mjs</div>
+        <div style="height: 10px"></div>
+        <div><span style="color: #A3A3AA">$</span> <span style="display: inline-block; width: 8px; height: 15px; background: #1C1C1F; vertical-align: -2px"></span></div>
+      </div>
+      <div style="display: flex; gap: 6px; padding: 10px 12px 14px">
+        <sc-for list="{{keys}}" as="k" hint-placeholder-count="6">
+          <button style="all: unset; box-sizing: border-box; flex: 1; height: 38px; border-radius: 12px; background: #ECECEE; color: #1C1C1F; font-family: 'JetBrains Mono', monospace; font-size: 12px; display: flex; align-items: center; justify-content: center; cursor: pointer">{{k}}</button>
+        </sc-for>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{isFiles}}" hint-placeholder-val="{{false}}">
+    <div style="flex: 1; padding: 20px 12px 0; display: flex; flex-direction: column">
+      <div style="padding: 0 12px 8px; font-size: 13px; color: #6B6B72">~/dsh-ios/engine</div>
+      <div style="background: #F5F5F6; border-radius: 22px; padding: 4px 0">
+        <sc-for list="{{files}}" as="f" hint-placeholder-count="6">
+          <button style="all: unset; box-sizing: border-box; width: 100%; display: flex; align-items: center; gap: 12px; height: 50px; padding: 0 18px; cursor: pointer">
+            <span style="flex: 1; font-size: 15px">{{f.name}}</span>
+            <span style="font-size: 13px; color: #6B6B72">{{f.meta}}</span>
+          </button>
+        </sc-for>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{isDiff}}" hint-placeholder-val="{{false}}">
+    <div style="flex: 1; padding: 20px 12px 0; display: flex; flex-direction: column; gap: 8px">
+      <div style="padding: 0 12px; font-size: 13px; color: #6B6B72">engine/boot.mjs · +12 −4</div>
+      <div style="background: #F5F5F6; border-radius: 22px; padding: 16px 0; font-family: 'JetBrains Mono', monospace; font-size: 12.5px; line-height: 1.8">
+        <sc-for list="{{diff}}" as="d" hint-placeholder-count="6">
+          <div style="padding: 0 16px; white-space: pre; background: {{d.bg}}; color: {{d.fg}}">{{d.text}}</div>
+        </sc-for>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{isContext}}" hint-placeholder-val="{{false}}">
+    <div style="flex: 1; padding: 32px 24px 0; display: flex; flex-direction: column; gap: 28px">
+      <div style="display: flex; flex-direction: column; gap: 14px">
+        <span style="font-size: 48px; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums">42%</span>
+        <span style="height: 6px; border-radius: 3px; background: #ECECEE; position: relative; overflow: hidden"><span style="position: absolute; left: 0; top: 0; bottom: 0; width: 42%; background: #0C0C0D; border-radius: 3px"></span></span>
+        <span style="font-size: 14px; color: #6B6B72">上下文已用 54k / 128k tokens</span>
+      </div>
+      <div style="display: flex; flex-direction: column">
+        <div style="display: flex; justify-content: space-between; height: 48px; align-items: center; font-size: 16px"><span>缓存命中</span><span style="color: #6B6B72">71%</span></div>
+        <div style="display: flex; justify-content: space-between; height: 48px; align-items: center; font-size: 16px"><span>本会话输入</span><span style="color: #6B6B72">186k</span></div>
+        <div style="display: flex; justify-content: space-between; height: 48px; align-items: center; font-size: 16px"><span>输出</span><span style="color: #6B6B72">9.8k</span></div>
+      </div>
+      <button style="all: unset; box-sizing: border-box; height: 52px; border-radius: 26px; background: #ECECEE; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 600; cursor: pointer">压缩上下文</button>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { tab: 'terminal' };
+  }
+  renderVals() {
+    const tab = this.state.tab;
+    const defs = [['terminal', '终端'], ['files', '文件'], ['diff', '改动'], ['context', '上下文']];
+    return {
+      tabs: defs.map(([id, label]) => ({
+        label,
+        selected: tab === id ? 'true' : 'false',
+        weight: tab === id ? '600' : '500',
+        color: tab === id ? '#FFFFFF' : '#6B6B72',
+        bg: tab === id ? '#0C0C0D' : 'transparent',
+        pick: () => this.setState({ tab: id })
+      })),
+      isTerminal: tab === 'terminal',
+      isFiles: tab === 'files',
+      isDiff: tab === 'diff',
+      isContext: tab === 'context',
+      keys: ['esc', 'tab', 'ctrl', '↑', '↓', '|'],
+      files: [
+        { name: 'plugins', meta: '3 项' },
+        { name: 'runtime', meta: '5 项' },
+        { name: 'shims', meta: '7 项' },
+        { name: 'boot.mjs', meta: '已修改' },
+        { name: 'ios.patch.yml', meta: '1.1 KB' },
+        { name: 'main.mjs', meta: '9.8 KB' },
+        { name: 'package.json', meta: '0.7 KB' }
+      ],
+      diff: [
+        { text: " import { relocate } from './runtime/relocate.mjs'", bg: 'transparent', fg: '#6B6B72' },
+        { text: "-import { spawnShell } from './runtime/legacy.mjs'", bg: '#FDECEA', fg: '#9A2A1A' },
+        { text: "+import { createShell } from './runtime/shell.mjs'", bg: '#E6F4EE', fg: '#0B6A4F' },
+        { text: '+const shell = createShell({ cwd })', bg: '#E6F4EE', fg: '#0B6A4F' },
+        { text: '+childProcess.install({ shell })', bg: '#E6F4EE', fg: '#0B6A4F' },
+        { text: ' await startEngine(argv)', bg: 'transparent', fg: '#6B6B72' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

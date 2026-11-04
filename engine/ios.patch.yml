@@ -1,0 +1,53 @@
+# iOS overlay for the stock web profile, applied with `--patch` after the
+# profile layer. iOS forbids fork/exec, so the execution world is replaced at
+# its service seams instead of patching engine files. Patches can disable an
+# entry but not rename its plugin, so replacements are disabled + inserted.
+
+# ctx.subprocess: commands run in-process (just-bash; `node` in a worker).
+- id: subprocess
+  disabled: true
+# ctx.sandbox: the interpreter's filesystem is the fence (no Seatbelt/bwrap
+# inside an app). bash-sandbox and permission presets stay as shipped.
+- id: sandbox
+  disabled: true
+
+# What the official product collects: session logs uploaded with official API
+# requests (on by default), message ratings, the /feedback command and usage
+# analytics. This is not the official client, so none of it runs here.
+- id: session-log-deepseek
+  disabled: true
+- id: ui-settings-session-log
+  disabled: true
+- id: message-feedback
+  disabled: true
+- id: ui-message-feedback
+  disabled: true
+- id: command-feedback
+  disabled: true
+- id: product-analytics
+  disabled: true
+# Only exports after feedback, which is off above; off here too, so nothing in
+# this build can reach the official collector.
+- id: session-telemetry-otel
+  disabled: true
+
+# LibreOffice ships macOS/Windows binaries and a wasm build; neither runs here.
+- id: office-to-pdf
+  disabled: true
+
+# The first-use workspace lives under <Documents>/deepseek-harness; darwin
+# asks osascript where Documents is, which does not exist here. The app's own
+# Documents directory is shared with the Files app.
+- id: workspace-controller
+  config:
+    documentsDirectory: !!js process.env.DSH_IOS_DOCUMENTS
+
+- insert:
+    - id: subprocess-ios
+      name: ./plugins/subprocess-ios/index.mjs
+    - id: sandbox-ios
+      name: ./plugins/sandbox-ios/index.mjs
+    # Restarts the engine (main.mjs replaces its worker) when a plugin change
+    # only applies at startup.
+    - id: ios-host
+      name: ./plugins/ios-host/index.mjs

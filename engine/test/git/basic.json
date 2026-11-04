@@ -1,0 +1,384 @@
+[
+ {
+  "git": [
+   "init",
+   "-q"
+  ]
+ },
+ {
+  "git": [
+   "status"
+  ]
+ },
+ {
+  "sh": "echo hello > a.txt; mkdir -p src/lib; echo 'x' > src/lib/b.js; echo 'y' > src/c.js; printf 'node_modules\\n*.log\\n' > .gitignore; echo z > debug.log"
+ },
+ {
+  "git": [
+   "status"
+  ]
+ },
+ {
+  "git": [
+   "status",
+   "-s"
+  ]
+ },
+ {
+  "git": [
+   "status",
+   "--porcelain",
+   "-b"
+  ]
+ },
+ {
+  "git": [
+   "status",
+   "-uall",
+   "--short"
+  ]
+ },
+ {
+  "git": [
+   "add",
+   "."
+  ]
+ },
+ {
+  "git": [
+   "status"
+  ]
+ },
+ {
+  "git": [
+   "commit",
+   "-m",
+   "first"
+  ]
+ },
+ {
+  "git": [
+   "log"
+  ]
+ },
+ {
+  "git": [
+   "log",
+   "--oneline"
+  ]
+ },
+ {
+  "sh": "echo world >> a.txt; rm src/c.js; echo new > n.txt"
+ },
+ {
+  "git": [
+   "status"
+  ]
+ },
+ {
+  "git": [
+   "status",
+   "--short"
+  ]
+ },
+ {
+  "git": [
+   "diff"
+  ]
+ },
+ {
+  "git": [
+   "diff",
+   "--stat"
+  ]
+ },
+ {
+  "git": [
+   "diff",
+   "--numstat"
+  ]
+ },
+ {
+  "git": [
+   "diff",
+   "--name-status"
+  ]
+ },
+ {
+  "git": [
+   "add",
+   "-A"
+  ]
+ },
+ {
+  "git": [
+   "diff",
+   "--cached"
+  ]
+ },
+ {
+  "git": [
+   "commit",
+   "-m",
+   "second\n\nbody line"
+  ]
+ },
+ {
+  "git": [
+   "log",
+   "--format=%h %s %an <%ae> %ad"
+  ]
+ },
+ {
+  "git": [
+   "log",
+   "-1",
+   "--stat"
+  ]
+ },
+ {
+  "git": [
+   "show",
+   "--stat"
+  ]
+ },
+ {
+  "git": [
+   "show",
+   "HEAD~1:a.txt"
+  ]
+ },
+ {
+  "git": [
+   "rev-parse",
+   "HEAD"
+  ]
+ },
+ {
+  "git": [
+   "rev-parse",
+   "--abbrev-ref",
+   "HEAD"
+  ]
+ },
+ {
+  "git": [
+   "rev-parse",
+   "--show-toplevel"
+  ]
+ },
+ {
+  "git": [
+   "rev-parse",
+   "--short",
+   "HEAD~1"
+  ]
+ },
+ {
+  "git": [
+   "branch"
+  ]
+ },
+ {
+  "git": [
+   "checkout",
+   "-b",
+   "feature"
+  ]
+ },
+ {
+  "sh": "echo feat > f.txt"
+ },
+ {
+  "git": [
+   "add",
+   "f.txt"
+  ]
+ },
+ {
+  "git": [
+   "commit",
+   "-q",
+   "-m",
+   "feat"
+  ]
+ },
+ {
+  "git": [
+   "branch",
+   "-v"
+  ]
+ },
+ {
+  "git": [
+   "checkout",
+   "main"
+  ]
+ },
+ {
+  "git": [
+   "merge",
+   "feature"
+  ]
+ },
+ {
+  "git": [
+   "log",
+   "--oneline",
+   "--decorate"
+  ]
+ },
+ {
+  "git": [
+   "branch",
+   "-d",
+   "feature"
+  ]
+ },
+ {
+  "git": [
+   "status"
+  ]
+ },
+ {
+  "git": [
+   "ls-files"
+  ]
+ },
+ {
+  "git": [
+   "ls-files",
+   "-s"
+  ]
+ },
+ {
+  "git": [
+   "ls-tree",
+   "HEAD"
+  ]
+ },
+ {
+  "git": [
+   "ls-tree",
+   "-r",
+   "-l",
+   "HEAD"
+  ]
+ },
+ {
+  "git": [
+   "cat-file",
+   "-t",
+   "HEAD"
+  ]
+ },
+ {
+  "git": [
+   "cat-file",
+   "-p",
+   "HEAD^{tree}"
+  ]
+ },
+ {
+  "git": [
+   "rev-list",
+   "--count",
+   "HEAD"
+  ]
+ },
+ {
+  "git": [
+   "tag",
+   "v1"
+  ]
+ },
+ {
+  "git": [
+   "tag"
+  ]
+ },
+ {
+  "git": [
+   "describe"
+  ],
+  "stderr": false
+ },
+ {
+  "git": [
+   "log",
+   "--oneline",
+   "--decorate",
+   "-2"
+  ]
+ },
+ {
+  "git": [
+   "config",
+   "user.name"
+  ]
+ },
+ {
+  "git": [
+   "config",
+   "core.bare"
+  ]
+ },
+ {
+  "git": [
+   "config",
+   "--get",
+   "nope.key"
+  ]
+ },
+ {
+  "git": [
+   "reset",
+   "--hard",
+   "HEAD~1"
+  ]
+ },
+ {
+  "git": [
+   "log",
+   "--oneline"
+  ]
+ },
+ {
+  "git": [
+   "check-ignore",
+   "debug.log",
+   "a.txt"
+  ]
+ },
+ {
+  "git": [
+   "rm",
+   "--cached",
+   "a.txt"
+  ]
+ },
+ {
+  "git": [
+   "status",
+   "-s"
+  ]
+ },
+ {
+  "git": [
+   "restore",
+   "--staged",
+   "a.txt"
+  ]
+ },
+ {
+  "git": [
+   "status",
+   "-s"
+  ]
+ },
+ {
+  "git": [
+   "nonsense"
+  ]
+ }
+]

@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>审批</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;family=Noto+Sans+SC:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#0C0C0D}a:hover{color:#0C0C0D}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #FFFFFF; color: #0C0C0D; font-family: Inter, 'Noto Sans SC', system-ui, sans-serif; display: flex; flex-direction: column; overflow: hidden; position: relative">
+
+  <header style="padding: 54px 8px 0; display: flex; align-items: center">
+    <a href="Drawer.dc.html" aria-label="打开侧边栏" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0C0C0D" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 8h16M4 16h10"></path></svg>
+    </a>
+    <span style="flex: 1; text-align: center; font-size: 16px; font-weight: 600">deepseek-v4</span>
+    <span style="width: 44px"></span>
+  </header>
+
+  <main style="flex: 1; padding: 20px 20px 0; display: flex; flex-direction: column; gap: 20px">
+    <div style="align-self: flex-end; max-width: 290px; background: #ECECEE; padding: 12px 16px; border-radius: 22px; font-size: 16px; line-height: 1.55">构建目录太大了，清一下再重新组装引擎。</div>
+    <p style="margin: 0; font-size: 16px; line-height: 1.75">build/ 有 1.4 GB，我先把它删掉。</p>
+    <div style="display: flex; align-items: center; gap: 8px; font-size: 14px; color: #6B6B72">
+      <span style="width: 7px; height: 7px; border-radius: 4px; background: #D98A00"></span>等你允许
+    </div>
+  </main>
+
+  <div style="position: absolute; inset: 0; background: rgba(12,12,13,0.28)"></div>
+
+  <section aria-labelledby="ap-title" style="position: absolute; left: 8px; right: 8px; bottom: 8px; background: #FFFFFF; border-radius: 36px; box-shadow: 0 20px 60px rgba(12,12,13,0.18); padding: 28px 22px 22px; display: flex; flex-direction: column; gap: 18px">
+    <div style="display: flex; flex-direction: column; gap: 6px">
+      <h2 id="ap-title" style="margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.01em">允许运行这条命令？</h2>
+      <p style="margin: 0; font-size: 14px; color: #6B6B72; line-height: 1.5">会删除 build/ 下约 1.4 GB 的文件。</p>
+    </div>
+    <div style="background: #F3F3F4; border-radius: 16px; padding: 14px 16px; font-family: 'JetBrains Mono', monospace; font-size: 14px">rm -rf build/</div>
+    <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding-top: 4px">
+      <button style="all: unset; box-sizing: border-box; height: 52px; border-radius: 26px; background: #E5E5E8; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 600; cursor: pointer">拒绝</button>
+      <button style="all: unset; box-sizing: border-box; height: 52px; border-radius: 26px; background: #0C0C0D; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 600; cursor: pointer">允许</button>
+    </div>
+    <button style="all: unset; align-self: center; height: 32px; font-size: 14px; color: #6B6B72; cursor: pointer">本会话内不再询问</button>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,134 @@
+name: DshIOS
+options:
+  bundleIdPrefix: com.wsw
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+packages:
+  SwiftTerm:
+    url: https://github.com/migueldeicaza/SwiftTerm
+    exactVersion: 1.10.0
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Automatic
+    # One version everywhere: the app, its extension, the App Store and the `v<version>` release tag.
+    # Changing it sends the TestFlight public beta back through review: a beta build bumps the build number.
+    # App Store and GitHub releases do bump it, or the update check never sees them.
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "4"
+targets:
+  DshIOS:
+    type: application
+    platform: iOS
+    sources:
+      - path: DshIOS
+      - path: Shared
+      # Built by scripts/build-engine.sh; copied into the bundle as-is.
+      - path: build/nodejs-project
+        type: folder
+        buildPhase: resources
+      # git for the engine: libgit2 behind N-API, registered as the linked binding `dsh_git`.
+      - path: ../native/git
+      # Images for the engine: ImageIO behind N-API, registered as the linked binding `dsh_image`.
+      - path: ../native/image
+      # The engine's filesystem view, for the Node entry points libc cannot reach: linked binding `dsh_root`.
+      - path: ../native/root/binding.c
+    dependencies:
+      # First: the app's own libc calls (libgit2) bind to it by link order, as Node's do by its load command.
+      - target: DshRoot
+      - framework: ../vendor/nodejs-mobile/rooted/NodeMobile.xcframework
+        embed: true
+      # Static libgit2 (scripts/build-libgit2.sh); HTTPS through Security.framework.
+      - framework: ../vendor/libgit2/Libgit2.xcframework
+        embed: false
+      - sdk: Security.framework
+      - sdk: ImageIO.framework
+      - sdk: CoreGraphics.framework
+      - sdk: libz.tbd
+      - sdk: libiconv.tbd
+      - package: SwiftTerm
+      - target: DshLiveActivity
+    info:
+      path: DshIOS/Info.plist
+      properties:
+        CFBundleDisplayName: Fish Pocket
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleDevelopmentRegion: zh-Hans
+        CFBundleLocalizations: [zh-Hans, en]
+        # Launch: the page colour and the mark, which the engine start-up screen keeps in place.
+        UILaunchScreen:
+          UIColorName: Background
+          UIImageName: LaunchMark
+          UIImageRespectsSafeAreaInsets: false
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        # iPad: several windows, each on its own conversation (one engine connection).
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: true
+        # ProMotion: without this an iPhone app stays at 60 Hz.
+        CADisableMinimumFrameDurationOnPhone: true
+        # 输入框的「拍照」(C-104).
+        NSCameraUsageDescription: 拍照后作为附件发给智能体。
+        # Only standard TLS/HTTPS through Security.framework and Node's OpenSSL; no proprietary crypto.
+        ITSAppUsesNonExemptEncryption: false
+        # The engine serves plain HTTP on 127.0.0.1 only.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+          # The workbench browser previews what the agent serves, plain http included.
+          NSAllowsArbitraryLoadsInWebContent: true
+        # BackgroundKeeper: silent audio when 设置 → 后台运行 →「静音音频」 is on (the default),
+        # and continued-processing tasks while sessions run when「任务续跑」 is on (iOS 26, off by default).
+        UIBackgroundModes: [audio]
+        BGTaskSchedulerPermittedIdentifiers: ["$(PRODUCT_BUNDLE_IDENTIFIER).task.*"]
+        # Agent status on the lock screen and in the Dynamic Island (LiveActivityController).
+        NSSupportsLiveActivities: true
+        # dsh://session/<id>: the Live Activity opens its session.
+        CFBundleURLTypes:
+          - CFBundleURLName: com.wsw.dsh-ios
+            CFBundleURLSchemes: [dsh]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.wsw.dsh-ios
+        # Design tokens (docs/design/README.md §3) live in Assets.xcassets; the accent is the ink colour.
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+        HEADER_SEARCH_PATHS: ["$(SRCROOT)/../vendor/nodejs-mobile/ios/include/node", "$(SRCROOT)/../vendor/libgit2/ios-arm64/include"]
+        GCC_PREPROCESSOR_DEFINITIONS: ["$(inherited)", "DSH_GIT_LINKED=1", "DSH_IMAGE_LINKED=1"]
+        # __FILE__ in native/git must not carry the build machine's home directory into the binary.
+        OTHER_CFLAGS: ["$(inherited)", "-fmacro-prefix-map=$(SRCROOT:dir:standardizepath)=."]
+  # The engine's filesystem view (native/root): libc's path functions, and libSystem re-exported.
+  DshRoot:
+    type: framework
+    platform: iOS
+    sources:
+      - path: ../native/root/root.c
+      - path: ../native/root/root.h
+        headerVisibility: public
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.wsw.dsh-ios.root
+        GENERATE_INFOPLIST_FILE: YES
+        DEFINES_MODULE: NO
+        SKIP_INSTALL: YES
+        OTHER_LDFLAGS: ["$(inherited)", "-Wl,-reexport-lSystem"]
+  # The Live Activity's views; the app starts and updates it.
+  DshLiveActivity:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: LiveActivity
+      - path: Shared
+    info:
+      path: LiveActivity/Info.plist
+      properties:
+        CFBundleDisplayName: Fish Pocket
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.wsw.dsh-ios.LiveActivity
