@@ -1,5 +1,17 @@
 import SwiftUI
 
+/// 创造模式 (`cordis`) is held back on iOS: what it makes are plugins with their own
+/// Web views, and there is no good native SwiftUI way to run those yet. Only the entries
+/// that start it are hidden — the preset itself still exists, so a session already in it
+/// keeps its name everywhere. Drop this flag once the views have a native home.
+enum CreatorMode {
+    static let id = "cordis"
+    static let hidden = true
+
+    /// True for the preset whose entries are held back.
+    static func isHidden(_ presetId: String?) -> Bool { hidden && presetId == id }
+}
+
 /// The Agent preset roster (`agentPresets/list`) with the display copy the web keeps
 /// for shipped presets: a preset that publishes no name is one of these.
 @MainActor
@@ -26,7 +38,7 @@ final class AgentPresetCatalog {
     private(set) var fallback = ""
     private(set) var codingTools = true
 
-    var visible: [Option] { options.filter { codingTools || !$0.needsCodingTools } }
+    var visible: [Option] { options.filter { (codingTools || !$0.needsCodingTools) && !CreatorMode.isHidden($0.id) } }
 
     func name(of id: String) -> String { options.first { $0.id == id }?.name ?? id }
 

@@ -33,16 +33,24 @@ struct ModelPicker: View {
                 }
             }
         } label: {
-            HStack(spacing: 6) {
-                Text(Self.shortName(context.modelName(model))).font(.callout.weight(.semibold)).foregroundStyle(Palette.ink).lineLimit(1)
-                Image(systemName: "chevron.down").font(.caption2.weight(.bold)).foregroundStyle(Palette.secondary)
+            // The full name the catalog publishes (`DeepSeek-V4.1-Flash`), with the
+            // reasoning level under it: the bar says exactly what the next turn runs on.
+            VStack(spacing: 0) {
+                HStack(spacing: 6) {
+                    Text(context.modelName(model)).font(.subheadline.weight(.semibold)).foregroundStyle(Palette.ink)
+                        .lineLimit(1).minimumScaleFactor(0.85).truncationMode(.middle)
+                    Image(systemName: "chevron.down").font(.caption2.weight(.bold)).foregroundStyle(Palette.secondary)
+                }
+                if let effort = context.effortName(model) {
+                    Text(effort).font(.caption2).foregroundStyle(Palette.secondary).lineLimit(1)
+                }
             }
             .padding(.horizontal, 12)
-            .frame(maxWidth: 240)
+            .frame(maxWidth: 260)
             .frame(minHeight: 44)
-            .contentShape(Capsule())
+            .contentShape(Rectangle())
         }
-        .accessibilityLabel(Text("模型：\(context.modelName(model))"))
+        .accessibilityLabel(context.effortName(model).map { Text("模型：\(context.modelName(model))，推理档位 \($0)") } ?? Text("模型：\(context.modelName(model))"))
         .sheet(isPresented: $searching) { ModelSearchSheet(model: model, context: context) }
         // MS-03: a provider's key or adapter changed; the catalog the menu shows follows.
         .onChange(of: app.revision("llm/adapters-updated", "settings/document-updated", "credentials/record-updated", "credentials/reference-updated")) {
@@ -82,12 +90,6 @@ struct ModelPicker: View {
 
     /// Menu rows are plain text: the tag follows the name.
     static func title(_ choice: ModelChoice) -> String { is1017(choice) ? "\(choice.name)  1017" : choice.name }
-
-    /// The top bar's name: `DeepSeek-V4.1-Flash` reads 「V4.1 Flash」; the menu keeps the full one.
-    static func shortName(_ name: String) -> String {
-        guard name.hasPrefix("DeepSeek-") else { return name }
-        return name.dropFirst("DeepSeek-".count).replacingOccurrences(of: "-", with: " ")
-    }
 }
 
 /// The 「1017」 info tag after the model name.

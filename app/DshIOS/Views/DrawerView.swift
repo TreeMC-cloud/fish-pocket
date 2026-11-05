@@ -64,6 +64,7 @@ struct DrawerView: View {
         NavigationStack {
             VStack(spacing: 0) {
                 topBar
+                newConversationButton
 
                 List {
                     if search.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -99,7 +100,7 @@ struct DrawerView: View {
 
     // MARK: Header and footer
 
-    /// Search, the view menu and a new conversation.
+    /// Search and the view menu; a new conversation has a row of its own under them.
     private var topBar: some View {
         HStack(spacing: 4) {
             HStack(spacing: 8) {
@@ -117,16 +118,28 @@ struct DrawerView: View {
             .frame(minHeight: 44)
             .background(Palette.bubble, in: Capsule())
             viewMenu
-            Button { if let target = workspace ?? app.workspaces.first { newConversation(target) } } label: {
-                Image(systemName: "square.and.pencil").font(.system(size: 19)).foregroundStyle(Palette.ink).hitTarget()
-            }
-            .disabled(app.workspaces.isEmpty)
-            .accessibilityLabel("新会话")
         }
         .padding(.leading, 16)
         .padding(.trailing, 8)
         .padding(.top, 12)
         .padding(.bottom, 4)
+    }
+
+    /// The one thing here that is not about finding a session, so it says its name and
+    /// takes the full width, as the web sidebar's 新会话 button does — not an icon among icons.
+    private var newConversationButton: some View {
+        Button { if let target = workspace ?? app.workspaces.first { newConversation(target) } } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "square.and.pencil").font(.callout.weight(.semibold))
+                Text("新会话")
+            }
+        }
+        .buttonStyle(.capsule(.primary, height: 46))
+        .disabled(app.workspaces.isEmpty)
+        .opacity(app.workspaces.isEmpty ? 0.4 : 1)
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 6)
     }
 
     private var viewMenu: some View {

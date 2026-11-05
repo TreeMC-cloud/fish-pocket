@@ -167,6 +167,13 @@ final class ComposerContext {
         return currentChoice(model)?.name ?? selection.model
     }
 
+    /// The reasoning level in force, named as the catalog names it; nil when the model has none.
+    func effortName(_ model: SessionModel) -> String? {
+        guard let choice = currentChoice(model), !choice.reasoningEfforts.isEmpty,
+              let current = selection(model)?.effort ?? choice.defaultEffort else { return nil }
+        return choice.reasoningEfforts.first { $0.id == current }?.name
+    }
+
     /// 「思考」maps to the adapter's `off` level and the model's default level.
     func thinking(_ model: SessionModel) -> (choice: ModelChoice, on: String, off: String, isOn: Bool)? {
         guard let choice = currentChoice(model) else { return nil }

@@ -212,17 +212,20 @@ struct PluginsView: View {
                     Image(systemName: "shippingbox")
                 }
             }
-            Button {
-                Task { await createWithAgent() }
-            } label: {
-                Label {
-                    Text("让 Agent 创建插件")
-                    Text("进入创造模式，制作属于你的 DSH 插件")
-                } icon: {
-                    Image(systemName: "sparkles")
+            // 创造模式 is held back on iOS (`CreatorMode`), and with it the entry that starts one.
+            if !CreatorMode.hidden {
+                Button {
+                    Task { await createWithAgent() }
+                } label: {
+                    Label {
+                        Text("让 Agent 创建插件")
+                        Text("进入创造模式，制作属于你的 DSH 插件")
+                    } icon: {
+                        Image(systemName: "sparkles")
+                    }
                 }
+                .disabled(creating)
             }
-            .disabled(creating)
         } label: {
             Image(systemName: "plus")
         }

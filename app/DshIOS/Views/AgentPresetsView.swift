@@ -13,9 +13,13 @@ struct AgentPresetsPage: View {
     private static let builtIn: Set<String> = ["standard", "ptc", "minimal", "cordis"]
 
     private var codingTools: Bool { app.settings.namespace("ui-settings")?["value"]["enabled"].bool ?? true }
-    /// AP-03: with the coding view off only Standard, Creator and custom presets show.
+    /// AP-03: with the coding view off only Standard and custom presets show (Creator: `CreatorMode`).
     private var visible: [JSON] {
-        (presets ?? []).filter { codingTools || !["ptc", "minimal"].contains($0["id"].string ?? "") }
+        (presets ?? []).filter {
+            let id = $0["id"].string ?? ""
+            // 创造模式 is held back on iOS (`CreatorMode`): it is not offered as a default either.
+            return (codingTools || !["ptc", "minimal"].contains(id)) && !CreatorMode.isHidden(id)
+        }
     }
 
     var body: some View {
@@ -42,10 +46,12 @@ struct AgentPresetsPage: View {
                 }
                 .groupedRow()
             }
-            if presets != nil {
+            // With 创造模式 held back there is nothing to put in an empty 自定义 section.
+            let creatorEntry = !CreatorMode.hidden && (presets ?? []).contains { $0["id"].string == CreatorMode.id }
+            if presets != nil, !custom.isEmpty || creatorEntry {
                 Section("自定义") {
                     ForEach(custom, id: \.self) { row($0) }
-                    if (presets ?? []).contains(where: { $0["id"].string == "cordis" }) {
+                    if creatorEntry {
                         Button { Task { await createDraft() } } label: {
                             Label("让 Agent 帮我创建预设模式", systemImage: "sparkles").foregroundStyle(Palette.ink)
                         }
