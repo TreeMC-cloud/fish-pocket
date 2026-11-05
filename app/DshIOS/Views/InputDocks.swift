@@ -196,7 +196,9 @@ private struct TodoProgress {
 }
 
 /// What the status bar stands for, one section each: the agent's tasks (C-120), the
-/// goal (C-121) and the queue (C-95), under whatever needs a decision now.
+/// goal (C-121) and the queue (C-95), under whatever needs a decision now. Every
+/// section comes and goes on its own, so the sheet closes itself once the last one
+/// leaves rather than standing there empty.
 struct ComposerStatusSheet: View {
     let model: SessionModel
     var waiting: String?
@@ -226,9 +228,27 @@ struct ComposerStatusSheet: View {
             .navigationTitle("状态")
             .navigationBarTitleDisplayMode(.inline)
             .closeButton(dismiss)
+            // 「插话」 on the last queued row (or 「全部插话」, a delete, the agent picking
+            // the queue up) leaves nothing to show: close, so the conversation behind
+            // shows where the message went instead of a blank panel.
+            .onChange(of: hasContent) { _, has in
+                if !has { dismiss() }
+            }
         }
         .presentationDetents([.medium, .large])
         .sheetNotices()
+    }
+
+    /// Whether any section still has something in it. The status bar hides on the same
+    /// terms, so an empty sheet has no bar left to have opened it either.
+    private var hasContent: Bool {
+        waiting != nil
+            || composer.contextNearlyFull
+            || composer.planActive
+            || !composer.todos.isEmpty
+            || composer.visibleGoal != nil
+            || !composer.queueRows.isEmpty
+            || !composer.visiblePending.isEmpty
     }
 
     @ViewBuilder
