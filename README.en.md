@@ -14,7 +14,7 @@
 
 <p align="center"><a href="README.md">中文</a></p>
 
-https://github.com/user-attachments/assets/9708af5c-0381-4f17-a04e-99bd8952e4b6
+https://github.com/user-attachments/assets/618e690f-3873-4f08-811d-3213b3b9a056
 
 ## iOS
 
