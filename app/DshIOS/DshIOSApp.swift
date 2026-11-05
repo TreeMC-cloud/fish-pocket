@@ -60,7 +60,12 @@ struct RootView: View {
     var body: some View {
         switch engine.phase {
         case .starting:
-            StartupView(message: String(localized: "正在启动 DSH 引擎…"))
+            // Long enough and it is not slow, it is stuck: say so and hand over the log.
+            if engine.stalled {
+                EngineTrouble(headline: String(localized: "引擎还没起来"), since: engine.startedAt, logFile: engine.logFile)
+            } else {
+                StartupView(message: String(localized: "正在启动 DSH 引擎…"))
+            }
         case .running(let url, let current):
             Group {
                 if let app = connection.app {
@@ -73,13 +78,7 @@ struct RootView: View {
             }
             .task(id: current) { await connection.connect(to: url, generation: current) }
         case .exited(let code):
-            VStack(spacing: 12) {
-                Text("引擎已退出（\(code)）").font(.headline)
-                Text(engine.logFile.path).font(.caption).foregroundStyle(Palette.secondary).textSelection(.enabled)
-            }
-            .padding()
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Palette.background)
+            EngineTrouble(headline: String(localized: "引擎已退出（\(code)）"), since: nil, logFile: engine.logFile)
         }
     }
 }
@@ -103,5 +102,105 @@ private struct StartupView: View {
             }
             .background(Palette.background)
             .ignoresSafeArea()
+    }
+}
+
+/// The engine never reached the interface: it is still being retried long past a
+/// normal launch, or it has exited. `engine.log` says which and why, and it was only
+/// reachable through 设置 → 引擎日志 — behind the interface that is missing. A launch that
+/// hangs is not a crash, so App Store Connect is told nothing about it either: what
+/// someone copies here is the only account of it there will ever be.
+private struct EngineTrouble: View {
+    let headline: String
+    /// When the wait began, for the running count; nil once the engine has exited.
+    let since: Date?
+    let logFile: URL
+
+    @State private var log = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(headline).font(.headline).foregroundStyle(Palette.ink)
+                // One Text: a stack would space the counter off the comma after it.
+                if let since {
+                    Text("已等待 ") + Text(since, style: .timer).monospacedDigit() + Text("，还在重试")
+                }
+                Text("下面是引擎日志。复制或分享出去，就能看出卡在哪一步。")
+            }
+            .font(.subheadline)
+            .foregroundStyle(Palette.secondary)
+
+            ScrollView {
+                Text(log.isEmpty ? String(localized: "（日志还是空的）") : log)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(Palette.ink)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+            }
+            .defaultScrollAnchor(.bottom)
+            .background(Palette.grouped, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+            HStack(spacing: 12) {
+                Button("复制报告") { copyToPasteboard(report()) }
+                    .buttonStyle(.capsule(.primary, height: 44))
+                if FileManager.default.fileExists(atPath: logFile.path) {
+                    ShareLink(item: logFile) { Text("分享日志") }
+                        .buttonStyle(.capsule(.secondary, height: 44))
+                }
+            }
+        }
+        .padding(16)
+        .readableWidth()
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(Palette.background.ignoresSafeArea())
+        .task {
+            // A failing boot writes another round of errors every few seconds, so keep
+            // up with it: what is on screen is what gets copied.
+            while !Task.isCancelled {
+                load()
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
+    }
+
+    /// One paste that carries the whole picture: which build, which device, how long it
+    /// has been, then the log. Without the first three lines a report is 「它卡住了」.
+    private func report() -> String {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "—"
+        let build = info?["CFBundleVersion"] as? String ?? "—"
+        var lines = [
+            "Fish Pocket \(version) (\(build))",
+            "\(deviceModel()) · iOS \(UIDevice.current.systemVersion)",
+            headline,
+        ]
+        if let since { lines.append("已等待 \(Int(Date().timeIntervalSince(since))) 秒") }
+        return lines.joined(separator: "\n") + "\n\n" + (log.isEmpty ? "（日志还是空的）" : log)
+    }
+
+    /// `iPhone18,1` and the like. The marketing name is what someone writes by hand and
+    /// gets wrong; this is what tells one model from another.
+    private func deviceModel() -> String {
+        // A simulator's `machine` is the Mac's architecture, which would name the wrong
+        // device in a report; it says which one it stands in for in the environment.
+        if let simulated = ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] {
+            return "\(simulated)（模拟器）"
+        }
+        var system = utsname()
+        uname(&system)
+        return withUnsafeBytes(of: &system.machine) {
+            String(cString: $0.baseAddress!.assumingMemoryBound(to: CChar.self))
+        }
+    }
+
+    /// The tail is enough to see the failure repeat, and keeps a paste pasteable.
+    private func load() {
+        guard let handle = try? FileHandle(forReadingFrom: logFile) else { return }
+        defer { try? handle.close() }
+        let size = (try? handle.seekToEnd()) ?? 0
+        try? handle.seek(toOffset: size > 32_000 ? size - 32_000 : 0)
+        log = String(decoding: handle.readDataToEndOfFile(), as: UTF8.self)
     }
 }

@@ -17,9 +17,22 @@ final class NodeEngine: ObservableObject {
     static let shared = NodeEngine()
 
     @Published private(set) var phase: Phase = .starting
-    /// When the current engine generation started listening (设置 → 引擎).
+    /// When the current engine generation started listening (the engine card atop 设置).
     @Published private(set) var runningSince: Date?
+    /// Start-up has run far past a normal launch and still has no URL. `main.mjs`
+    /// restarts an engine worker that dies, so a boot that keeps failing never ends
+    /// the process and so never reaches `.exited`: without this the launch screen
+    /// stays up forever. A launch that hangs is not a crash either, so nothing about
+    /// it reaches App Store Connect — the device's own log is the only account of it.
+    @Published private(set) var stalled = false
+    /// When `start()` ran, for the counter on that screen.
+    @Published private(set) var startedAt: Date?
     private var started = false
+
+    /// A cold start is a few seconds, and far less once the engine is warm. What this
+    /// brings up says the engine is still being retried and leaves on its own if it
+    /// does come up, so waiting any longer would only hide the problem.
+    private static let stallAfter: TimeInterval = 20
 
     private init() {}
 
@@ -28,6 +41,7 @@ final class NodeEngine: ObservableObject {
     func start() {
         guard !started else { return }
         started = true
+        startedAt = Date()
         guard EnginePaths.install() else {
             phase = .exited(-1)
             return
@@ -69,6 +83,10 @@ final class NodeEngine: ObservableObject {
                 generation += 1
                 phase = .running(url, generation: generation)
                 runningSince = Date()
+                stalled = false
+            }
+            if case .starting = phase, let startedAt, Date().timeIntervalSince(startedAt) > Self.stallAfter {
+                stalled = true
             }
             try? await Task.sleep(for: .milliseconds(500))
         }
