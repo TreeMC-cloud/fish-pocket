@@ -273,25 +273,20 @@ enum ScheduleRule {
         return content
     }
 
-    /// The persisted rule fields only: the `expected` record of compare-and-set.
-    static func snapshot(_ record: JSON) -> JSON {
-        var value: [String: JSON] = ["id": record["id"], "title": record["title"], "prompt": record["prompt"], "scheduledAt": record["scheduledAt"], "kind": record["kind"]]
-        switch record["kind"].string {
-        case "after": value["afterSeconds"] = record["afterSeconds"]
-        case "every": value["everySeconds"] = record["everySeconds"]
-        case "daily": value["time"] = record["time"]; value["timeZone"] = record["timeZone"]
-        case "weekly": value["time"] = record["time"]; value["timeZone"] = record["timeZone"]; value["weekdays"] = record["weekdays"]
-        case "cron": value["expression"] = record["expression"]; value["timeZone"] = record["timeZone"]
-        default: break
-        }
-        return .object(value)
+    /// `active` is the only status that still has a timer; 0.2.2 split the rest
+    /// into `paused` and `ended`.
+    static func isArmed(_ record: JSON) -> Bool { (record["status"].string ?? "active") == "active" }
+
+    /// Rule kinds this editor can represent. 0.2.2 added `rrule`, which it cannot:
+    /// those rules stay read-only rather than being rewritten on save.
+    static func editableKind(_ record: JSON) -> Bool {
+        ["after", "at", "every", "daily", "weekly", "cron"].contains(record["kind"].string ?? "at")
     }
 
     /// A rejected update, in the card's words (`ruleError`).
     static func errorMessage(_ code: String, unit: IntervalUnit) -> String {
         switch code {
         case "schedule_conflict": return "任务在保存前已发生变化。当前显示已保存的规则，请重试"
-        case "schedule_ended": return "已结束的任务为只读，无法修改时间"
         case "schedule_not_found": return "此任务当前不可用"
         case "subagent_session": return "此会话属于子 agent，永远不会收到投递的提醒"
         case "invalid_time_zone": return "请输入有效的 IANA 时区，例如 Asia/Shanghai"

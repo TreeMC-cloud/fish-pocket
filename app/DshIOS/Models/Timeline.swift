@@ -74,6 +74,25 @@ struct Attachment: Hashable {
         originalHeight = ref["originalDimensions"]["height"].int
     }
 
+    /// The stored ref `session/attachment` reads since 0.2.2 (it takes the whole
+    /// ref, not just its id), rebuilt from the parsed fields so an older flat
+    /// block still resolves.
+    var ref: JSON? {
+        guard let attachmentId, let mediaType, let bytes, let width, let height else { return nil }
+        var value: [String: JSON] = [
+            "attachmentId": .string(attachmentId),
+            "mediaType": .string(mediaType),
+            "bytes": .number(Double(bytes)),
+            "width": .number(Double(width)),
+            "height": .number(Double(height)),
+        ]
+        if let name { value["name"] = .string(name) }
+        if let originalWidth, let originalHeight {
+            value["originalDimensions"] = ["width": .number(Double(originalWidth)), "height": .number(Double(originalHeight))]
+        }
+        return .object(value)
+    }
+
     /// Image blocks render inline; file blocks show as a name.
     var isImage: Bool { mediaType?.hasPrefix("image/") ?? true }
 }

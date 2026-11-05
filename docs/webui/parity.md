@@ -4,7 +4,7 @@
 >
 > 功能 ID 引用自同目录三份清单：`C-` → [conversation.md](conversation.md)，`S-` → [shell.md](shell.md)，`G-/A-/M-/I-/AP-/O-/P-/PC-/F-/MK-/MS-` → [settings-plugins.md](settings-plugins.md)（其中设置外壳的 `S-01…S-07` 写作 `设置 S-0x`，与 shell.md 的 `S-xx` 区分）。那三份清单里的 ☐/☑ 状态已过时，**以本文为准**。
 >
-> 更新于 2026-11-04。状态变化时同步更新本文。
+> 更新于 2026-11-06（引擎从 `0.2.1-rc.4` 升到 `0.2.2-rc.1`，新增 §3.2）。状态变化时同步更新本文。
 
 ## 1. 现状
 
@@ -78,6 +78,29 @@ C-49 `/goal` 气泡 · C-90 原子 chip · C-16 鲸鱼动画与流光 · C-30 �
 ## 3.1 iOS 化改造
 
 对照 Apple HIG 把网页式交互改成手机习惯（2026-11-04）：工具行 44pt、详情进 sheet；回复操作收进长按菜单；统一的「+」托盘（相机 / 照片 / 文件、引用、指令、模型、计划、思考、访问模式）；运行中有字时也能停止；多层 dock 合成一条状态条；顶栏显示会话名；抽屉默认按工作区分组（可切到按时间）、防左滑误归档；Toast 短文案放到拇指区；工作台不自动弹键盘；保存放工具栏；设置首页精简，开发者项收进「高级」；添加提供商分两步；`@` 引用在输入框和气泡里只显示 `@标题`。规格文档 `docs/webui/` 只用来确定协议和能力，界面以 `docs/design/README.md` 为准。
+
+## 3.2 上游 `0.2.2-rc.1` 新增（尚未移植）
+
+引擎 2026-11-06 从 `0.2.1-rc.4` 升到 `0.2.2-rc.1`。协议层的删除、改形和新增方法见 [protocol.md](protocol.md) §0.1，原生客户端已经跟上的只有那几处**必须**跟的形状变化（`schedule/edit`、`session/attachment`、任务记录的 `target` / `status` / `updatedAt`）。下面是上游新增、原生还没有的能力。
+
+| 上游新增 | 原生现状 |
+|---|---|
+| 把聊天里的文本作为引用插入输入框，发送后显示紧凑预览 | 没有 |
+| 整段历史会话复制为 Markdown（含可用的原始日志路径） | 没有 |
+| 工作步骤收起后保留全部助手文字回复，可切换为仅最终回答 | 收起就是收起，没有这个切换 |
+| 插件管理的富文本详情（`pluginMarket/readEntryDetail`、`pluginManager/readBundleDetail`） | 插件页只有现有字段 |
+| 第三方插件包更新（`pluginManager/listVersions`、`updateBundle`；热更新失败回滚旧版） | 只能装和卸，不能更新 |
+| 自动化任务：一键清除全部已结束（`schedule/deleteInactive`）、立即投递一次（`schedule/run`）、`paused` 状态的暂停 / 恢复、`rrule` 规则 | 都没有；`rrule` 任务在详情页按只读处理（这个编辑器表达不了它） |
+| 会话快照与订阅拆成独立接口（`session/state`、`session/events`、`session/wait`、`session/observeState`、`session/observeProjections`、`session/observeEvent`） | 仍走 `session/follow` + `session/control`，上游也还在，不急 |
+| 工具返回值的原始 JSON 查看（`toolResults/watch`） | 没有（Trajectory 本来就不移植，见 §4） |
+| 回答下方的操作卡（`actionCards/act`） | 没有 |
+| 日语、西班牙语、法语、德语、俄语、巴西葡萄牙语界面 | 只有中文和英文 |
+| 图片进入输入框就上传，发送时复用；默认单图上限提到 50 MiB | 仍在发送时把图片内联成 base64 放进 `submittedAttachments` |
+| 默认关闭的 `apply_patch` 工具（一次完成多文件增删改移） | 没有专属卡片，按通用工具卡渲染 |
+| 统一的右键 / 键盘菜单，文件预览常驻目录树与文件定位 | 桌面交互为主，见 §4；目录树待评估 |
+| 实验插件：`subagent_oar`、个性化推荐（`pluginRecommendations/*`）、开发者工具统计、变更请求与工作树（`forgePanel/*` 20 个方法）、共享会话（`liveshareShares/*` 12 个方法） | 不移植；「变更请求与工作树」如果以后要做，是一整块新功能 |
+
+引擎侧的变化不需要原生改动：最低 Node 提到 24.9（内嵌 nodejs-mobile 是 24.20.0，满足）、Cordis 升到 4.1.0、pi-ai 升到 1.3.0、Search 给模型更长的摘要、远程连接默认开启 WebSocket 压缩（客户端协商，不开就不压）、Web 静态资源支持 ETag。「Git 工作树」插件已并入「变更请求与工作树」，本项目没有在 `dsh.profile.bundles` 里启用过它，不受影响。
 
 ## 4. 暂不移植（桌面专属）
 

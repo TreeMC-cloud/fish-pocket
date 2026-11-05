@@ -1,9 +1,9 @@
 # DSH Web 客户端 ↔ 引擎：传输与数据协议
 
-> 适用版本：`@deepseek-ai/dsh@0.2.1-rc.4`（Host 发布标识 `{"version":"0.2.1-rc.4","commit":"ec17a2c"}`）。
+> 适用版本：引擎已升级到 `@deepseek-ai/dsh@0.2.2-rc.1`（Host 发布标识 `{"version":"0.2.2-rc.1","commit":"c59d10a"}`）。**正文与附录 A 仍是 `0.2.1-rc.4`（`commit: ec17a2c`）的快照**：两版的方法表差异已逐条导出比对，见 §0.1；其余描述还没有重新复核。
 > 来源：`engine/node_modules/@deepseek-ai/*` 的未压缩 JS / `.d.ts` / README（MIT），以及 2026-11-03 在 Mac 上实跑引擎（`DSH_IOS_PORT=3095`，无模型 Key）抓到的真实报文。
 > 本文目标：只看这一份文档就能写出与官方 Web 前端行为一致的 Swift 客户端。
-> 配套文件：[`rpc-methods.json`](rpc-methods.json)：全部 144 个 Remote 方法的机器可读描述，含 wire 参数名、JSON Schema、结果 Schema、是否 stream，可直接拿来做 Swift Codable 代码生成。
+> 配套文件：[`rpc-methods.json`](rpc-methods.json)：`0.2.1-rc.4` 全部 144 个 Remote 方法的机器可读描述，含 wire 参数名、JSON Schema、结果 Schema、是否 stream，可直接拿来做 Swift Codable 代码生成。`0.2.2-rc.1` 共 193 个方法，这份文件还没有重新导出，差异见 §0.1。
 >
 > 示例里的 `<DATA>` 代表引擎数据目录，`<T>` / `<C>` 分别代表 launch token 和 cookie 值，均已脱敏。
 
@@ -18,9 +18,54 @@
 | 会话实时 | `session/follow` stream：先给 `snapshot`（窗口内的历史和投影），再推每条持久事件 `{type:'event', event}`，以及进程内的助手流帧 `{type:'assistant-stream', frame}`，用于 token 级增量。 |
 | 全局投影 | `session/control` stream：开头一份 `baseline`，之后是 `{type:'projection', sessionId, key, value, seq}`，覆盖所有会话的标题、todo、inbox、token 用量等。 |
 | 工作区 | `workspace/follow` stream：开头 `baseline`，之后是 `upsert/remove/order/archived/pinned/replace`。 |
-| 方法目录 | 29 个包贡献 Remote 方法，**共 144 个**，其中 14 个是 stream。26 个包由 `dsh-api-remotes` 挂载，`remoteAccess`、`speech`、`cotTranslation` 由各自的客户端包挂载。全量表见附录 A 和 `rpc-methods.json`。 |
+| 方法目录 | 29 个包贡献 Remote 方法，**共 144 个**，其中 14 个是 stream。26 个包由 `dsh-api-remotes` 挂载，`remoteAccess`、`speech`、`cotTranslation` 由各自的客户端包挂载。全量表见附录 A 和 `rpc-methods.json`。（`0.2.2-rc.1`：34 个包、193 个方法、20 个 stream，差异见 §0.1。） |
 | 二进制 | 结果里带字节的方法（如 `workspaceFiles/readBytes`）以 `multipart/form-data` 返回：`metadata` 部分是 JSON 信封，`bytes-N` 部分放字节。上传用专用路由 `POST /api/session/uploadFileBinary`（octet-stream）。 |
 | 插件 UI | 插件的浏览器端是 JS 包（React 和 slot 系统，通过 `window.__ModuleLoader__` 加载），**原生端无法执行**。原生能拿到的只有数据：RPC 和事件、`tool/result.data.meta`（工具的 presentationMeta）、各类投影。 |
+
+## 0.1 `0.2.2-rc.1` 相对 `0.2.1-rc.4` 的方法表变化
+
+> 口径：两版各自安装后，从生成描述符导出方法表再比对（见 §12 第 9 条），并在 Mac 上实跑 `0.2.2-rc.1` 引擎（`DSH_IOS_PORT=3097`，带 `ios.patch.yml`）逐条验证过下面的请求形状。方法数 144 → 193，stream 14 → 20，贡献方法的包 29 → 34。
+
+**删除的方法**（请求返回 404 `not found`，已实测）
+
+| 删除 | 替代 |
+|---|---|
+| `schedule/delete` | `schedule/edit`：`{id, action:"delete", expectedUpdatedAt?}` |
+| `schedule/update` | `schedule/edit`：`{id, action:"update", patch:{title?,prompt?,timing?,target?,active?}, expectedUpdatedAt?}`；`patch.timing` 就是旧 `change` 的形状（`kind` + snake_case 字段） |
+
+**请求形状变化**
+
+| 方法 | 变化 |
+|---|---|
+| `session/attachment` | `attachmentId: string` → `attachment: ImageAttachmentRef`（`{attachmentId, mediaType, bytes, width, height, name?, originalDimensions?}`，前五个必填）。日志里的图片块本来就带整个 ref，客户端把它原样回传即可 |
+| `schedule/history` | 不再需要 `sessionId`（任务行自带绑定）：`{id, limit, before?}` |
+| `session/follow` | 新增可选 `activate`：请求后台激活，省略仍是被动读 |
+| `session/page` | `throughSeq` 变可选，省略表示取当前日志末尾 |
+
+**结果与记录形状变化**
+
+- `schedule/edit` 成功时**直接返回任务记录**，不再像旧 `schedule/update` 那样包一层 `{record}`；结果里的失败码只剩 `schedule_not_found` 和 `schedule_conflict`。
+- 参数校验不再走结果码，而是**抛** `schedule/input-invalid`，原因在 `error.details.code`（`invalid_time_zone`、`not_future`、`frequency_too_high`、`invalid_prompt`、`invalid_rule`、`time_out_of_range` 等照旧；`schedule_ended` 已不存在）。另有 `schedule/target-archived`（投递目标会话已归档）。
+- 任务记录（`schedule/catalog` / `list` / `view` / `edit`）：`sessionId` → `target`（`{kind:"session"|"new_once"|"new", sessionId?, create?}`）加 `involvedSessionIds`；`status` 从 `active|inactive` 变成 `active|paused|ended`；新增 `createdAt`、`updatedAt`（编辑的 compare-and-set 改用它）、`executionActive`、`deliveryFloorEndsAt`；新增 `rrule` 规则种类。
+- compare-and-set 由「回传整条记录」变成「回传 `updatedAt`」。
+
+**新增的 51 个方法**
+
+| 包 | 方法 |
+|---|---|
+| `dsh-api-session-controller` | `session/events`、`session/state`、`session/wait`、`session/observeEvent`、`session/observeProjections`、`session/observeState`（快照与订阅拆成独立接口；`session/follow`、`session/control` 仍在） |
+| `dsh-schedule` | `schedule/create`、`schedule/edit`、`schedule/view`、`schedule/run`、`schedule/deleteInactive`、`schedule/deliveryLimits` |
+| `dsh-plugin-manager` | `pluginManager/listVersions`、`pluginManager/readBundleDetail`、`pluginManager/updateBundle` |
+| `dsh-plugin-market` | `pluginMarket/readEntryDetail` |
+| `dsh-action-cards` | `actionCards/act` |
+| `dsh-client-ui-trajectory` | `toolResults/watch` |
+| `dsh-plugin-recommendations` | `pluginRecommendations/describe`（实验：个性化推荐） |
+| `dsh-experimental-client-ui-forge` | `forgePanel/*` 20 个（实验：变更请求与工作树） |
+| `dsh-experimental-liveshare` | `liveshareShares/*` 12 个（实验：共享会话） |
+
+**`$events` 转发白名单**（`dsh-api-remotes/lib/index.js` 的 `API_REMOTE_FORWARDED_EVENTS`）：28 → 30，没有删除、没有 mode 变化，新增 `llm/models-updated` 和 `plugin-manager/update-state`。
+
+---
 
 ## 1. 认证、握手、可信 Host 规则
 
@@ -596,7 +641,7 @@ prompt 的 `content` 元素：`{type:'text', text}`、`{type:'image', mediaType:
 6. **`request/header`、`system/message` 很大**（实测分别约 28KB、6KB），历史窗口可能达到 MB 级。解码时要懒处理，或者先跳过不关心的类型。
 7. **不认识的事件类型**：没有 `ignorable` 标记的未知类型，Host 的持久化读路径会拒绝。客户端渲染时直接忽略即可（网页有 `registerFallback`），但要保留其 `seq`，以维持序号连续性的判断。
 8. **WKWebView 和原生并存**时，二者共享同一个 browser Peer，都会收到 waterfall，会出现竞争答复（先到先得）。
-9. 本文的协议形状是从 0.2.1-rc.4 的生成描述符直接导出的，引擎升级后需要重新运行导出脚本生成 `rpc-methods.json`，再做差异比对。
+9. 本文的协议形状是从 0.2.1-rc.4 的生成描述符直接导出的，引擎升级后需要重新运行导出脚本生成 `rpc-methods.json`，再做差异比对。导出口径：遍历 `engine/node_modules/@deepseek-ai/*` 里 `exports["./typert"]` 指向的 `lib/typert.host.js`，取 `TYPERT.invocations`（`namespace`/`method`/`mode`/`parameters[].codec.jsonSchema`/`result`）。升到 `0.2.2-rc.1` 的比对结果见 §0.1；完整重新导出还差两件事：`source: "lookup"` 的参数 wire 名是 `<lookup 类型>Id`（不是形参名），以及结果 schema 为联合类型时描述符只给 zod 对象，要用 `z.toJSONSchema` 转一次。
 
 ---
 

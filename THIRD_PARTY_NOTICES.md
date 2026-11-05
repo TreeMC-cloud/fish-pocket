@@ -8,7 +8,7 @@
 
 | 组件 | 版本 | 许可证 | 版权方 | 用途 |
 |---|---|---|---|---|
-| [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（`@deepseek-ai/dsh` 及其插件包） | 0.2.1-rc.4 | MIT | Copyright (c) 2026 DeepSeek | 引擎 |
+| [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（`@deepseek-ai/dsh` 及其插件包） | 0.2.2-rc.1 | MIT | Copyright (c) 2026 DeepSeek | 引擎 |
 | [nodejs-mobile](https://github.com/digidem/nodejs-mobile)（digidem 分支，上游为 [nodejs-mobile/nodejs-mobile](https://github.com/nodejs-mobile/nodejs-mobile)） | 24.20.0-0 | Node.js 许可证（MIT 及其捆绑组件的各自许可证） | Node.js 贡献者等 | 内嵌 Node 运行时，以预编译的 `NodeMobile.xcframework` 下载 |
 | [just-bash](https://github.com/vercel-labs/just-bash) | 3.6.0 | Apache-2.0 | Copyright 2025 Vercel Inc. | bash 解释器和内置命令 |
 | [libgit2](https://github.com/libgit2/libgit2) | 1.9.7 | GPLv2 + 链接例外 | libgit2 贡献者 | git 能力，未修改源码，静态链接 |
@@ -19,15 +19,15 @@ libgit2 的完整许可证见其仓库的 [COPYING](https://github.com/libgit2/l
 
 ## 打进 App 的 npm 包
 
-`scripts/build-engine.sh` 组装出的引擎目录约有 650 个 npm 包，分布如下：
+`scripts/build-engine.sh` 组装出的引擎目录约有 680 个 npm 包，分布如下：
 
 | 许可证 | 包数量 |
 |---|---|
-| MIT | 539 |
+| MIT | 566 |
 | Apache-2.0 | 59 |
-| ISC | 22 |
-| BSD-3-Clause | 18 |
-| BlueOak-1.0.0 | 5 |
+| ISC | 23 |
+| BSD-3-Clause | 19 |
+| BlueOak-1.0.0 | 6 |
 | BSD-2-Clause | 2 |
 | 其他（0BSD、Unlicense、Python-2.0、MPL-2.0 各 1 个，双重许可 3 个） | 7 |
 

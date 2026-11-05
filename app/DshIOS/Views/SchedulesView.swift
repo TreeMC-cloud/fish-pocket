@@ -67,15 +67,16 @@ struct SchedulesView: View {
     @State private var creating = false
 
     private var scoped: [JSON] {
-        catalog.records.filter { sessionId == nil || $0["sessionId"].string == sessionId }
+        catalog.records.filter { sessionId == nil || $0["target"]["sessionId"].string == sessionId }
     }
 
     private var shown: [JSON] {
         let needle = query.trimmed.lowercased()
         return scoped
-            .filter { filter == .all || ($0["status"].string ?? "active") == filter.rawValue }
+            .filter { filter == .all || ScheduleRule.isArmed($0) == (filter == .active) }
             .filter { record in
-                needle.isEmpty || ["title", "prompt", "sessionId"].contains { (record[$0].string ?? "").lowercased().contains(needle) }
+                needle.isEmpty || ["title", "prompt"].contains { (record[$0].string ?? "").lowercased().contains(needle) }
+                    || (record["target"]["sessionId"].string ?? "").lowercased().contains(needle)
             }
             .sorted { (ScheduleFormat.date($0["scheduledAt"].string) ?? .distantFuture) < (ScheduleFormat.date($1["scheduledAt"].string) ?? .distantFuture) }
     }
@@ -194,7 +195,7 @@ struct SchedulesView: View {
     /// Hard delete (with its delivery history); the outcome goes to the shell toast (S-104).
     private func delete(_ record: JSON) async -> Bool {
         do {
-            _ = try await app.client.call("schedule/delete", ["request": ["sessionId": record["sessionId"], "id": record["id"]]])
+            _ = try await app.client.call("schedule/edit", ["request": ["id": record["id"], "action": "delete"]])
             Haptics.success()
             app.showToast(String(localized: "任务已删除"))
             await catalog.load(app.client)
@@ -212,12 +213,13 @@ private struct ScheduleRow: View {
     let record: JSON
 
     var body: some View {
-        let inactive = record["status"].string == "inactive"
+        let armed = ScheduleRule.isArmed(record)
+        let stopped = record["status"].string == "paused" ? String(localized: "已暂停") : String(localized: "已结束")
         VStack(alignment: .leading, spacing: 4) {
-            Text(record["title"].string ?? "任务").font(.callout).foregroundStyle(inactive ? Palette.secondary : Palette.ink).lineLimit(2)
-            Text(([inactive ? String(localized: "已结束") : nil, ScheduleFormat.frequency(record)].compactMap { $0 }).joined(separator: " · "))
+            Text(record["title"].string ?? "任务").font(.callout).foregroundStyle(armed ? Palette.ink : Palette.secondary).lineLimit(2)
+            Text(([armed ? nil : stopped, ScheduleFormat.frequency(record)].compactMap { $0 }).joined(separator: " · "))
                 .font(.footnote).foregroundStyle(Palette.secondary)
-            if !inactive, let at = record["scheduledAt"].string {
+            if armed, let at = record["scheduledAt"].string {
                 TimelineView(.periodic(from: .now, by: 30)) { context in
                     Text("下次运行：\(ScheduleFormat.nextRun(at, now: context.date))")
                         .font(.caption).foregroundStyle(Palette.faint).monospacedDigit()
@@ -266,7 +268,7 @@ struct ScheduleDetailView: View {
     @State private var deleting = false
 
     private var task: JSON? { catalog.entry(taskId) ?? retained }
-    private var active: Bool { task?["status"].string != "inactive" }
+    private var active: Bool { task.map(ScheduleRule.isArmed) ?? true }
     private var dirty: Bool {
         guard let shown, let stored, active else { return false }
         return shown.key != stored.key
@@ -354,7 +356,9 @@ struct ScheduleDetailView: View {
 
     @ViewBuilder
     private func rule(_ task: JSON) -> some View {
-        let editable = active && !busy
+        // 0.2.2 added the `rrule` kind, which this editor cannot represent: such a rule
+        // stays read-only, so a save can never rewrite it into a one-shot.
+        let editable = active && ScheduleRule.editableKind(task) && !busy
         Form {
             Section {
                 if active, shown != nil {
@@ -404,7 +408,7 @@ struct ScheduleDetailView: View {
                 )
             }
 
-            if withinSession != task["sessionId"].string, let session = task["sessionId"].string {
+            if withinSession != task["target"]["sessionId"].string, let session = task["target"]["sessionId"].string {
                 linkedSession(session)
             }
 
@@ -469,7 +473,7 @@ struct ScheduleDetailView: View {
         retained = record
         let values = ScheduleRule.values(record)
         guard values.key != stored?.key else { return }
-        if let current = shown, let previous = stored, record["status"].string != "inactive" {
+        if let current = shown, let previous = stored, ScheduleRule.isArmed(record) {
             if memory == previous.weekdays { memory = nil }
             shown = ScheduleRule.merge(values, draft: current, stored: previous)
         } else {
@@ -523,25 +527,27 @@ struct ScheduleDetailView: View {
         failure = nil
     }
 
-    /// Compare-and-set `schedule/update` (S-103): the record seen when editing began, plus only the changed fields.
+    /// Compare-and-set `schedule/edit` (S-103): only the changed fields, against the
+    /// `updatedAt` read when editing began.
     private func save() async {
         guard let task, let current = shown, let stored else { return }
         if ScheduleRule.draftError(current, unit: unit) != nil { failure = .local; Haptics.warning(); return }
         pending = true
         failure = nil
-        var request: [String: JSON] = ["sessionId": task["sessionId"], "id": task["id"], "expected": ScheduleRule.snapshot(task)]
-        request.merge(ScheduleRule.contentChange(current, stored)) { $1 }
-        if current.timingKey != stored.timingKey { request["change"] = ScheduleRule.change(current.draft, current.kind, current.weekdays) }
+        var patch = ScheduleRule.contentChange(current, stored)
+        if current.timingKey != stored.timingKey { patch["timing"] = ScheduleRule.change(current.draft, current.kind, current.weekdays) }
+        var request: [String: JSON] = ["id": task["id"], "action": "update", "patch": .object(patch)]
+        if let updatedAt = task["updatedAt"].string { request["expectedUpdatedAt"] = .string(updatedAt) }
         do {
-            let value = try await app.client.call("schedule/update", ["request": .object(request)])
+            let value = try await app.client.call("schedule/edit", ["request": .object(request)])
             pending = false
             if let code = value["code"].string {
                 failure = .message(ScheduleRule.errorMessage(code, unit: unit))
                 Haptics.error()
-                if ["schedule_conflict", "schedule_ended", "schedule_not_found"].contains(code) { await catalog.load(app.client) }
+                if ["schedule_conflict", "schedule_not_found"].contains(code) { await catalog.load(app.client) }
                 return
             }
-            let saved = ScheduleRule.values(value["record"])
+            let saved = ScheduleRule.values(value)
             self.stored = saved
             shown = saved
             memory = nil
@@ -549,7 +555,10 @@ struct ScheduleDetailView: View {
             await catalog.load(app.client)
         } catch {
             pending = false
-            failure = .message(ScheduleRule.unknownError)
+            // 0.2.2 rejects an invalid patch instead of answering with a code;
+            // `schedule/input-invalid` carries the reason in its details.
+            let code = (error as? EngineError)?.detail["details"]["code"].string
+            failure = .message(code.map { ScheduleRule.errorMessage($0, unit: unit) } ?? ScheduleRule.unknownError)
             Haptics.error()
         }
     }
@@ -682,7 +691,7 @@ private struct DeliveryHistoryView: View {
     private func load(_ before: String?) async {
         loading = true
         failure = nil
-        var request: [String: JSON] = ["sessionId": task["sessionId"], "id": task["id"], "limit": 20]
+        var request: [String: JSON] = ["id": task["id"], "limit": 20]
         if let before { request["before"] = .string(before) }
         do {
             let value = try await app.client.call("schedule/history", ["request": .object(request)])

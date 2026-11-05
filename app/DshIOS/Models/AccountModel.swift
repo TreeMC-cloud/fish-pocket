@@ -26,7 +26,7 @@ struct BonusNotice: Identifiable, Hashable {
 @Observable
 final class AccountModel {
     /// The engine build this client speaks for; account methods require it in `client`.
-    static let clientVersion = "0.2.1-rc.4"
+    static let clientVersion = "0.2.2-rc.1"
 
     @ObservationIgnored private let client: EngineClient
     @ObservationIgnored private let mux: StreamMux

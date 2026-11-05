@@ -31,7 +31,7 @@ extension AppModel {
 
     /// Active scheduled tasks created by this session (`schedule/catalog`, `status == active`).
     func activeSchedules(of id: String) -> [JSON] {
-        scheduleCatalog.filter { $0["sessionId"].string == id && $0["status"].string == "active" }
+        scheduleCatalog.filter { $0["target"]["sessionId"].string == id && $0["status"].string == "active" }
     }
 
     // MARK: Subagents

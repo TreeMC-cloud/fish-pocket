@@ -1,6 +1,6 @@
 # DSH Web UI 功能清单 · 壳层 / 导航 / 工作区 / 侧栏（iOS SwiftUI 重写用）
 
-> 版本基线：`@deepseek-ai/*` `0.2.1-rc.4`（`engine/node_modules/@deepseek-ai/`，MIT，未压缩 React bundle `lib/client.js`）。
+> 版本基线：`@deepseek-ai/*` `0.2.1-rc.4`（`engine/node_modules/@deepseek-ai/`，MIT，未压缩 React bundle `lib/client.js`）。引擎已升级到 `0.2.2-rc.1`，本文只同步了版本号字面量；`0.2.2-rc.1` 的上游新增功能见 [parity.md](parity.md) §3.2，协议层差异见 [protocol.md](protocol.md) §0.1。
 > 范围：应用外壳、左侧栏、会话列表与工作区、目录选择、会话顶栏与 Hero、右侧栏（开始页 / 文件 / 文档预览 / 浏览器 / 在应用中打开 / 终端）、自动化任务、主题 / 语言 / 字号 / 快捷键、登录 / API Key / 首启引导、Toast 与连接状态、Web UI 传输协议。
 > **不在本文**：消息流 / 输入框 / 工具卡片 / 审批卡片 / 模型与插件设置的内部细节（另有文档）；本文只记录它们挂到壳上的入口。
 >
@@ -50,7 +50,7 @@ layout store：`panelInfo.activePanelId`（null = 会话）+ `layoutInfo {sideba
 ### 1.2 左侧栏结构（`dsh-client-ui-sidebar` → `SidebarRoot`）
 
 自上而下：
-1. **品牌行**：`sidebar.brand.mark`（官方鲸鱼 FishLogo）+ `sidebar.brand.name`（"DeepSeek Harness" 字标；未装 brand-official 时显示 `brand.localBuild` "DSH 本地构建" + 构建号 `0.2.1-rc.4-<commit>`）。非 macOS Desktop 时品牌本身是"新建会话"按钮。右侧折叠按钮（`toggle.open` / `toggle.collapse`，快捷键 `sidebar.left.toggle`）。rail 态折叠按钮叠品牌 mark + `sidebar.toggle.badge`（桌面更新蓝点，iOS 永不显示）。
+1. **品牌行**：`sidebar.brand.mark`（官方鲸鱼 FishLogo）+ `sidebar.brand.name`（"DeepSeek Harness" 字标；未装 brand-official 时显示 `brand.localBuild` "DSH 本地构建" + 构建号 `0.2.2-rc.1-<commit>`）。非 macOS Desktop 时品牌本身是"新建会话"按钮。右侧折叠按钮（`toggle.open` / `toggle.collapse`，快捷键 `sidebar.left.toggle`）。rail 态折叠按钮叠品牌 mark + `sidebar.toggle.badge`（桌面更新蓝点，iOS 永不显示）。
 2. **新会话**按钮（`session.new` "新会话"，显示 `session.new` 快捷键键帽）→ `uiWorkspace.startSession()`。
 3. **全局面板列表**（`nav`，aria `panels.label`）：`sidebar.panellist` 注册项按 order —— `plugins`「插件」(0) / `schedules`「自动化任务」(10)；点击 `ctx.layout.selectPanel(id)`；选中项 `aria-current=page`。再之后是 **「更多」**（`panels.more`，`IconAppsAddOutlineRegular`）菜单：内容由 `sidebar.panellist.actions` 渲染（entry-customization：「浏览更多插件」「创建你的插件」）；面板可 pin/unpin（`plugins` 永远固定；pin 状态仅内存）。
 4. **工作区 / 会话区**：`sidebar.workspaces`（ui-workspace `WorkspaceBrowser`）—— 见 A 章。
@@ -274,7 +274,7 @@ locale ns `sidebar`：
 | S-114 | 语言 | zh / en；无偏好时跟随系统（全标签→主子标签→en），存 Host `locale.preference` | `settings/mutate {ns:"locale"}` | `Picker`；App 内用 `.environment(\.locale)` + 自带字符串表 | E §1.2 |
 | S-115 | 快捷键速查 / 编辑 | `shortcuts.open`（Mod+/）面板：搜索、分组、录键、移除、恢复默认、冲突检测；存本地 `dsh.keybindings.v1` | 本地 | iPad：`UIKeyCommand` discoverability（长按 ⌘）；编辑 **[可选]** | E §1.3、§3 |
 | S-116 | 打开配置文件 | 仅 loopback 连接显示 | `settings/openSettingsDocument` | **[iOS 不适用]**（Host 本机） | D §1.9 |
-| S-117 | 当前版本 / 反馈 | 「当前版本：0.2.1-rc.4」；反馈 = 飞书问卷（带 uid/版本/设备预填） | — | Form 行 + `openURL` | D §1.1、§1.9 |
+| S-117 | 当前版本 / 反馈 | 「当前版本：0.2.2-rc.1」；反馈 = 飞书问卷（带 uid/版本/设备预填） | — | Form 行 + `openURL` | D §1.1、§1.9 |
 
 ### 2.10 账号、引导、通知、传输
 
@@ -2385,7 +2385,7 @@ Host 配置：`deliveryHistoryDays` 默认 30（1–3650）、`deliveryHistoryRe
 |---|---|---|---|
 | 触发按钮 | 侧栏底部。已登录：头像（`profile.avatarUrl`，`referrerPolicy:no-referrer`，加载失败回退 `IconUserOutlineMedium`）+ 宽侧栏时显示名字 `profile.name ?? profile.contact ?? t("signedIn")`（资料加载中为空）。未登录：`IconEllipsisOutlineMedium` + 宽侧栏显示「更多」。aria-label「账号菜单」。点击开合 Menu（`side:"top"`）| 窄侧栏（rail）只显图标 | — |
 | 菜单项 `settings`「设置」| 图标 `IconSettingsOutlineMedium`，带快捷键提示（`settings.open`：desktop `Cmd/Ctrl+,`，web `Cmd/Ctrl+Alt+,`）；点击关菜单→打开设置面板 | | — |
-| 菜单项 `contact`「意见反馈」| 图标 `IconPaperPlaneOutlineMedium`；`window.open(contactUrl(...))` 打开飞书问卷，URL 带 `hide_uid/hide_source/hide_harness_version/hide_device_info=1` 与 `prefill_uid=<profile.id>`、`prefill_harness_version=0.2.1-rc.4`、`prefill_device_info=<UA; screen_resolution=WxH>`。默认问卷地址来自 `ContactConfig.contactFormUrl`（可被 `globalThis.__DSH_CONTACT_CONFIG__` 覆盖）| 无需登录 | — |
+| 菜单项 `contact`「意见反馈」| 图标 `IconPaperPlaneOutlineMedium`；`window.open(contactUrl(...))` 打开飞书问卷，URL 带 `hide_uid/hide_source/hide_harness_version/hide_device_info=1` 与 `prefill_uid=<profile.id>`、`prefill_harness_version=0.2.2-rc.1`、`prefill_device_info=<UA; screen_resolution=WxH>`。默认问卷地址来自 `ContactConfig.contactFormUrl`（可被 `globalThis.__DSH_CONTACT_CONFIG__` 覆盖）| 无需登录 | — |
 | 菜单项 `signin`「登录」| 未登录时出现，`IconUserOutlineMedium`；→ `start()` 打开 SignInDialog 并发起登录 | | `account/startSignIn` |
 | 菜单项 `signout`「退出登录」| 已登录时出现，自定义 Logout 图标；先查 `hasRunningAccountTasks` 再弹 SignOutDialog；查询中 `disabled` | | `account/hasRunningAccountTasks` |
 | 打开设置时刷新 | 设置面板 closed→open 时 `refreshAccount()`：头像失败重试 + 资料 + 余额 + 赠金通知 | | `account/getProfile`、`account/getBalance`、`account/getUnnotifiedBonuses` |
@@ -2470,7 +2470,7 @@ Host 配置：`deliveryHistoryDays` 默认 30（1–3650）、`deliveryHistoryRe
 - 通用分区 `general`：只是 `settings.general.item` 的竖排容器，条目见 §4。
 - `sidebar.toggle.badge` = `DesktopUpdateBadge`：侧栏折叠时展开按钮上的蓝点，**含义=桌面端有可用更新/更新进行中/更新失败**（断线/连接中时隐藏，除非正在 installing）；tooltip 为更新状态文案。Web/iOS 无 `dshDesktop.updates` → 永不显示。
 - DesktopUpdateIndicator [desktop-only]：宽侧栏底部按钮，phase `checking|available|downloading|verifying|installing|ready|error` 对应文案，点击 `bridge.open()`。
-- 关于/版本：通用分区 `current-version` 行「当前版本：0.2.1-rc.4」（order 100）；无独立"关于"页、无"检查更新"按钮（Web）。
+- 关于/版本：通用分区 `current-version` 行「当前版本：0.2.2-rc.1」（order 100）；无独立"关于"页、无"检查更新"按钮（Web）。
 - 反馈：账号菜单「意见反馈」；会话顶栏 ⋯ 菜单「反馈」（需 `feedbackUi` 服务）。
 - 退出：账号菜单「退出登录」。无"退出应用"。
 
@@ -2545,7 +2545,7 @@ Host 配置：`deliveryHistoryDays` 默认 30（1–3650）、`deliveryHistoryRe
 #### 2.1 `account/*`（dsh-api-account-controller → dsh-deepseek-account-platform）
 公共类型：
 ```ts
-AccountClientMetadata = { version: string /* "0.2.1-rc.4" */, locale: string /* 活动 UI 语言 */, timezoneOffsetSeconds: number /* -getTimezoneOffset()*60，东正 */ }
+AccountClientMetadata = { version: string /* "0.2.2-rc.1" */, locale: string /* 活动 UI 语言 */, timezoneOffsetSeconds: number /* -getTimezoneOffset()*60，东正 */ }
 SignInAttemptId = string(branded)
 SignInErrorCode = 'no-response' | 'network' | 'protocol' | 'expired' | 'storage'
 SignInAttemptView = { id, phase: 'initializing'|'waiting-browser'|'exchanging'|'committing'|'succeeded'|'cancelled'|'expired'|'failed', authorizeUrl?: string, expiresAt?: number, errorCode?: SignInErrorCode }

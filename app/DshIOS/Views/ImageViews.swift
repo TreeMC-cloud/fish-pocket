@@ -73,7 +73,7 @@ struct AttachmentThumb: View {
         .task(id: attempt) {
             guard image == nil, let id = attachment.attachmentId, let model else { return }
             if let cached = model.cachedImage(id) { image = cached; return }
-            if let loaded = await model.image(id) { image = loaded } else { failed = true }
+            if let loaded = await model.image(attachment) { image = loaded } else { failed = true }
         }
         .fullScreenCover(isPresented: $viewing) {
             if let image { ImageViewer(image: image, name: attachment.name) }
