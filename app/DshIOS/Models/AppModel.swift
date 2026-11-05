@@ -149,16 +149,6 @@ final class AppModel {
     private(set) var generation = 0
     /// Count of `emit`s seen per event name; read through `revision(_:)`.
     private(set) var eventCounts: [String: Int] = [:]
-    /// `ui-theme.preference`, shared with the web and desktop clients.
-    private(set) var themePreference = "system"
-
-    var colorScheme: ColorScheme? {
-        switch themePreference {
-        case "light": return .light
-        case "dark": return .dark
-        default: return nil
-        }
-    }
 
     @ObservationIgnored private var workspaceTask: Task<Void, Never>?
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
@@ -268,7 +258,7 @@ final class AppModel {
     func reloadTheme() async {
         guard let value = try? await client.call("settings/describe") else { return }
         let theme = value["namespaces"].array.first { $0["ns"].string == "ui-theme" }
-        themePreference = theme?["value"]["preference"].string ?? "system"
+        UserDefaults.standard.set(theme?["value"]["preference"].string ?? "system", forKey: ThemePreference.key)
     }
 
     func refreshSessions() async {
