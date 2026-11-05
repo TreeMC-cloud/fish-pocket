@@ -22,7 +22,7 @@ iOS 部分的改动请至少在模拟器上跑一遍，并在 PR 里写明测过
 
 - 引擎日志在 App 容器的 `Library/Application Support/dsh-ios/root/home/dsh/.ios/engine.log`。
 - Debug 构建里，把导出 `default` 函数的 `*.mjs` 放进容器的 `Library/Application Support/dsh-ios/root/home/dsh/.ios/debug/`，引擎会执行它并写出 `*.mjs.out`。
-- Debug 构建可以用 `-dshOpen drawer|workbench|approval|timeline|settings|plugins|schedules|signin` 直接打开页面。
+- Debug 构建可以用 `-dshOpen drawer|workbench|approval|timeline|settings|plugins|schedules|signin|support` 直接打开页面。
 
 ## 约定
 
