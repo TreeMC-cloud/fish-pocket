@@ -30,6 +30,8 @@ struct MainView: View {
     @State private var onboarding: Onboarding?
     /// 「添加 API Key」 was chosen in the sign-in sheet: its key editor follows once that sheet is gone.
     @State private var keyEditorRef: String?
+    /// The ask for a Star or a share.
+    @State private var supportDialog = false
 
     /// `session`: the one this window opened on, when it opened on one.
     init(session: String? = nil) {
@@ -54,8 +56,16 @@ struct MainView: View {
         app.workspaces.first { $0.id == workspaceId } ?? app.workspaces.first
     }
 
-    /// Each version is announced once, so never under a sheet.
-    private var canAnnounceUpdate: Bool {
+    /// A button of the support dialog: the ask is answered for good.
+    private func settleSupport(then action: () -> Void) {
+        Haptics.tap()
+        SupportPrompt.settle()
+        supportDialog = false
+        action()
+    }
+
+    /// Announcements are made once, so never under a sheet.
+    private var canAnnounce: Bool {
         scenePhase == .active && onboarding == nil && sheet == nil
     }
 
@@ -70,11 +80,19 @@ struct MainView: View {
         // through the same door, and a wider match would swallow every new window.
         .handlesExternalEvents(preferring: ["dsh://"], allowing: ["dsh://"])
         .task(id: app.workspaces.map(\.id)) { if selection == nil { newConversation(in: workspace) } }
-        .task(id: canAnnounceUpdate) {
-            guard canAnnounceUpdate else { return }
+        .task(id: canAnnounce) {
+            guard canAnnounce else { return }
             await UpdateChecker.shared.checkIfDue()
             guard let update = UpdateChecker.shared.takeAnnouncement() else { return }
             app.showToast(String(localized: "发现新版本 \(update.version)"), action: String(localized: "更新")) { openURL(update.url) }
+        }
+        // After a pause, and only into a quiet app: otherwise the next finished turn asks instead.
+        .task(id: app.supportMoment) {
+            guard app.supportMoment > 0 else { return }
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled, canAnnounce, app.toast == nil, app.currentSession == selection,
+                  !app.sessions.values.contains(where: \.running), SupportPrompt.take() else { return }
+            supportDialog = true
         }
         // Windows take turns: what is read is the one in front.
         .onChange(of: scenePhase) { _, phase in if phase == .active { app.currentSession = selection } }
@@ -118,7 +136,7 @@ struct MainView: View {
             setDrawer(false)
         }
         #if DEBUG
-        // Screenshots and UI checks: `simctl launch … -dshOpen drawer|workbench|approval|timeline|settings|plugins|schedules|signin`.
+        // Screenshots and UI checks: `simctl launch … -dshOpen drawer|workbench|approval|timeline|settings|plugins|schedules|signin|support`.
         .task {
             switch UserDefaults.standard.string(forKey: "dshOpen") {
             case "drawer": drawerOpen = true
@@ -126,6 +144,7 @@ struct MainView: View {
             case "plugins": sheet = .plugins
             case "schedules": sheet = .schedules
             case "signin": sheet = .signIn
+            case "support": supportDialog = true
             default: break
             }
         }
@@ -152,6 +171,17 @@ struct MainView: View {
         }
         .modifier(ShellDialogs())
         .overlay { ShellNotices() }
+        .overlay {
+            if supportDialog {
+                SupportDialog(
+                    star: { settleSupport { openURL(AppLinks.repository) } },
+                    share: { settleSupport { AppLinks.share() } },
+                    later: { supportDialog = false }
+                )
+                .transition(.opacity.combined(with: .scale(scale: 0.94)))
+            }
+        }
+        .animation(.snappy, value: supportDialog)
         // A live turn ran out of account balance: offer Platform's top-up page, then re-read balances.
         .alert("当前无可用余额", isPresented: Binding(get: { app.account.quotaPrompt }, set: { app.account.quotaPrompt = $0 })) {
             Button("取消", role: .cancel) {}

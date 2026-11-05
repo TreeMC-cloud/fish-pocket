@@ -141,11 +141,16 @@ final class SessionModel {
             composer.observe(event)
             events.append(event)
             if timeline.apply(event) { publishTimeline() } else { publishTimelineState() }
-            // Only a live turn end prompts for quota; history replays never do.
-            if event["type"].string == "turn/end", let failure = TurnFailure(reason: event["data"]["reason"]) {
-                if failure.isQuota { app.account.reportQuota(code: failure.code ?? "QUOTA") }
-                // A key that stopped working is the conversation's card to explain; none at all is the first step.
-                if failure.credentialProblem == .missing { app.requestCredentials(.start) }
+            // Only a live turn end prompts for quota or support; history replays never do.
+            if event["type"].string == "turn/end" {
+                if let failure = TurnFailure(reason: event["data"]["reason"]) {
+                    if failure.isQuota { app.account.reportQuota(code: failure.code ?? "QUOTA") }
+                    // A key that stopped working is the conversation's card to explain; none at all is the first step.
+                    if failure.credentialProblem == .missing { app.requestCredentials(.start) }
+                } else if event["data"]["reason"]["kind"].string == "completed", subagentAddress == nil, hasReply,
+                          queued.isEmpty, composer.text.isEmpty {
+                    app.noteCompletedTurn()
+                }
             }
             switch event["type"].string {
             case "turn/end", "session/title", "tool/result", "user/message", "turn/start":

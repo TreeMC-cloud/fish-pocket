@@ -120,6 +120,8 @@ final class AppModel {
     var lastError: String?
     /// The single shell toast (S-128): a newer one replaces the current one.
     private(set) var toast: Toast?
+    /// Raised each time an ask for a Star or a share is due.
+    private(set) var supportMoment = 0
     /// Shell dialogs the root view presents.
     var archiveRequest: ArchiveRequest?
     var renameRequest: RenameRequest?
@@ -251,6 +253,11 @@ final class AppModel {
     }
 
     func dismissToast(_ id: UUID) { if toast?.id == id { toast = nil } }
+
+    /// A turn finished well; `MainView` decides whether this is the moment to ask (`SupportPrompt`).
+    func noteCompletedTurn() {
+        if SupportPrompt.noteCompletedTurn() { supportMoment += 1 }
+    }
 
     func workspace(of sessionId: String) -> Workspace? { workspaces.first { $0.sessionIds.contains(sessionId) } }
     func isArchived(_ id: String) -> Bool { archived.contains(id) }

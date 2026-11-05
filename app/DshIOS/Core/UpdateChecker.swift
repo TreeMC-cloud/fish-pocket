@@ -46,6 +46,8 @@ final class UpdateChecker {
     private static let announcedKey = "dsh.update.announced"
 
     private(set) var status = Status.idle
+    /// The app's App Store page, once a lookup has found one.
+    private(set) var storePage: URL?
     private var lastChecked: Date?
 
     private enum Latest {
@@ -118,6 +120,7 @@ final class UpdateChecker {
             guard let url = components?.url, let (data, code) = await Self.get(url), code == 200,
                   let lookup = try? JSONDecoder().decode(StoreLookup.self, from: data) else { continue }
             if let listing = lookup.results.first, let page = URL(string: "https://apps.apple.com/app/id\(listing.trackId)") {
+                storePage = page
                 return .release(version: listing.version, url: page)
             }
             result = .none

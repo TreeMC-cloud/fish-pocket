@@ -96,6 +96,14 @@ struct SettingsView: View {
 
                 Section {
                     linkRow("给个 Star", "GitHub", Self.repositoryURL)
+                        .environment(\.openURL, OpenURLAction { _ in SupportPrompt.settle(); return .systemAction })
+                    ShareLink(item: AppLinks.shareText) {
+                        HStack {
+                            Text("分享给朋友").foregroundStyle(Palette.ink)
+                            Spacer()
+                            Image(systemName: "square.and.arrow.up").font(.caption).foregroundStyle(Palette.faint)
+                        }
+                    }
                     linkRow("开源仓库", UpdateChecker.repository, Self.repositoryURL)
                     linkRow("问题反馈", "GitHub Issues", Self.issuesURL)
                     linkRow("作者", "sai · imsai.cc", Self.authorURL)
@@ -127,7 +135,7 @@ struct SettingsView: View {
         return ""
     }
 
-    private static let repositoryURL = URL(string: "https://github.com/\(UpdateChecker.repository)")!
+    private static let repositoryURL = AppLinks.repository
     private static let issuesURL = repositoryURL.appending(path: "issues")
     private static let authorURL = URL(string: "https://imsai.cc")!
 
