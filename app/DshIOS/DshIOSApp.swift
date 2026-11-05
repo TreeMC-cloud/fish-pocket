@@ -55,9 +55,15 @@ struct RootView: View {
     /// The session this window opened on.
     let session: String?
     @EnvironmentObject private var engine: NodeEngine
+    @AppStorage(ThemePreference.key) private var themePreference = ThemePreference.system
     private let connection = EngineConnection.shared
 
     var body: some View {
+        content.background(WindowAppearance(style: ThemePreference.style(themePreference)))
+    }
+
+    @ViewBuilder
+    private var content: some View {
         switch engine.phase {
         case .starting:
             // Long enough and it is not slow, it is stuck: say so and hand over the log.
@@ -71,7 +77,6 @@ struct RootView: View {
                 if let app = connection.app {
                     MainView(session: session)
                         .environment(app)
-                        .preferredColorScheme(app.colorScheme)
                 } else {
                     StartupView(message: String(localized: "正在连接…"))
                 }

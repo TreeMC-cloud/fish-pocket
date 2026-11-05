@@ -26,6 +26,53 @@ enum Palette {
     static let scrim = Color("Scrim")
 }
 
+/// The appearance choice lives in the engine (`ui-theme.preference`, shared with the web and
+/// desktop clients). The app keeps the last value it read, because the screens shown while
+/// the engine starts need it before the engine can answer.
+enum ThemePreference {
+    static let key = "dsh.theme.preference"
+    static let system = "system"
+
+    static func style(_ preference: String) -> UIUserInterfaceStyle {
+        switch preference {
+        case "light": .light
+        case "dark": .dark
+        default: .unspecified
+        }
+    }
+}
+
+/// Sets the appearance on the window itself. `preferredColorScheme(nil)` does not bring a
+/// sheet that is already up back to the system's: going from 深色 to 跟随系统 left 设置 dark.
+struct WindowAppearance: UIViewRepresentable {
+    let style: UIUserInterfaceStyle
+
+    func makeUIView(context: Context) -> Probe { Probe(style: style) }
+
+    func updateUIView(_ view: Probe, context: Context) {
+        view.style = style
+        view.window?.overrideUserInterfaceStyle = style
+    }
+
+    final class Probe: UIView {
+        var style: UIUserInterfaceStyle
+
+        init(style: UIUserInterfaceStyle) {
+            self.style = style
+            super.init(frame: .zero)
+            isUserInteractionEnabled = false
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) { fatalError("not used from a nib") }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            window?.overrideUserInterfaceStyle = style
+        }
+    }
+}
+
 /// Pill buttons: `.primary` is ink on the page, `.secondary` the grey control fill.
 struct CapsuleButtonStyle: ButtonStyle {
     enum Kind { case primary, secondary, outline }
