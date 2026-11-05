@@ -7,13 +7,12 @@ import SwiftUI
 struct DrawerView: View {
     enum GroupBy: String { case time, workspace }
 
-    /// Where a session sits in the time view; the current blank one leads without a heading.
+    /// Where a session sits in the time view.
     enum Period: CaseIterable {
-        case draft, pinned, today, week, earlier
+        case pinned, today, week, earlier
 
-        var title: String? {
+        var title: String {
             switch self {
-            case .draft: nil
             case .pinned: String(localized: "置顶")
             case .today: String(localized: "今天")
             case .week: String(localized: "本周")
@@ -127,6 +126,7 @@ struct DrawerView: View {
 
     /// The one thing here that is not about finding a session, so it says its name and
     /// takes the full width, as the web sidebar's 新会话 button does — not an icon among icons.
+    /// Outlined: the drawer is for finding sessions, and this must not outweigh them.
     private var newConversationButton: some View {
         Button { if let target = workspace ?? app.workspaces.first { newConversation(target) } } label: {
             HStack(spacing: 8) {
@@ -134,7 +134,7 @@ struct DrawerView: View {
                 Text("新会话")
             }
         }
-        .buttonStyle(.capsule(.primary, height: 46))
+        .buttonStyle(.capsule(.outline, height: 44))
         .disabled(app.workspaces.isEmpty)
         .opacity(app.workspaces.isEmpty ? 0.4 : 1)
         .padding(.horizontal, 16)
@@ -236,8 +236,8 @@ struct DrawerView: View {
 
     /// One group per workspace in host order, then 「未分组」 when it has members.
     private var groups: [SessionGroup] {
-        var result = app.workspaces.map { SessionGroup(id: $0.id, workspace: $0, rows: app.sessions(in: $0, current: selection)) }
-        let loose = app.sessions(in: nil, current: selection)
+        var result = app.workspaces.map { SessionGroup(id: $0.id, workspace: $0, rows: app.sessions(in: $0)) }
+        let loose = app.sessions(in: nil)
         if !loose.isEmpty { result.append(SessionGroup(id: Self.ungrouped, workspace: nil, rows: loose)) }
         return result
     }
@@ -368,26 +368,22 @@ struct DrawerView: View {
         let periods = Dictionary(grouping: rows, by: period(of:))
         ForEach(Period.allCases, id: \.self) { period in
             if let members = periods[period] {
-                if let title = period.title {
-                    Text(title)
-                        .font(.footnote)
-                        .foregroundStyle(Palette.secondary)
-                        .padding(.leading, 14)
-                        .padding(.top, 10)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .accessibilityAddTraits(.isHeader)
-                        .plainRow()
-                }
+                Text(period.title)
+                    .font(.footnote)
+                    .foregroundStyle(Palette.secondary)
+                    .padding(.leading, 14)
+                    .padding(.top, 10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityAddTraits(.isHeader)
+                    .plainRow()
                 ForEach(members) { session in row(session, subtitle: placeLine(of: session)) }
             }
         }
     }
 
-    /// Every session of the list: the current blank one, pinned, then most recent.
+    /// Every session of the list: pinned, then most recent.
     private var timeRows: [SessionSummary] {
         allSessions(includeArchived: false).sorted { lhs, rhs in
-            if lhs.id == selection && lhs.blank { return true }
-            if rhs.id == selection && rhs.blank { return false }
             let lp = app.pinned.firstIndex(of: lhs.id), rp = app.pinned.firstIndex(of: rhs.id)
             if (lp != nil) != (rp != nil) { return lp != nil }
             if let lp, let rp { return lp < rp }
@@ -396,13 +392,12 @@ struct DrawerView: View {
     }
 
     private func allSessions(includeArchived: Bool) -> [SessionSummary] {
-        app.workspaces.flatMap { app.sessions(in: $0, includeArchived: includeArchived, current: selection) }
-            + app.sessions(in: nil, includeArchived: includeArchived, current: selection)
+        app.workspaces.flatMap { app.sessions(in: $0, includeArchived: includeArchived) }
+            + app.sessions(in: nil, includeArchived: includeArchived)
     }
 
     private func period(of session: SessionSummary) -> Period {
-        if session.blank { return .draft }
-        return app.isPinned(session.id) ? .pinned : Self.period(of: session.updatedAt)
+        app.isPinned(session.id) ? .pinned : Self.period(of: session.updatedAt)
     }
 
     static func period(of date: Date, now: Date = .now, calendar: Calendar = .current) -> Period {
@@ -463,7 +458,7 @@ struct DrawerView: View {
     /// at most twenty. Archived sessions count, after the others: search is how one finds anything.
     private var searchMatches: [SessionSummary] {
         let query = search.trimmingCharacters(in: .whitespaces)
-        let pool = allSessions(includeArchived: true).filter { !$0.blank }
+        let pool = allSessions(includeArchived: true)
         let local = pool
             .filter { app.title(of: $0.id).localizedCaseInsensitiveContains(query) || (app.workspace(of: $0.id)?.displayTitle.localizedCaseInsensitiveContains(query) ?? false) }
             .sorted { $0.updatedAt > $1.updatedAt }
@@ -520,7 +515,7 @@ struct DrawerView: View {
     /// running, an unread completion; an idle row with an active task shows a clock.
     @ViewBuilder
     private func leading(_ session: SessionSummary) -> some View {
-        if app.isArchived(session.id) || session.blank {
+        if app.isArchived(session.id) {
             Color.clear
         } else if app.isWaiting(session.id) {
             StatusDot(state: .waiting)
@@ -551,7 +546,7 @@ struct DrawerView: View {
                 leading(session)
                 .frame(width: 14, height: subtitle == nil ? nil : 20)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(session.blank ? String(localized: "新会话") : app.title(of: session.id))
+                    Text(app.title(of: session.id))
                         .font(.subheadline)
                         .foregroundStyle(Palette.ink)
                         .lineLimit(1)
@@ -560,19 +555,17 @@ struct DrawerView: View {
                     }
                 }
                 Spacer(minLength: 4)
-                if !session.blank {
-                    if app.isPinned(session.id) && !archived {
-                        Image(systemName: "pin.fill").font(.caption2).foregroundStyle(Palette.faint)
-                    }
-                    if archived {
-                        Image(systemName: "archivebox").font(.caption).foregroundStyle(Palette.faint)
-                    } else if let pending = app.pendingLabel(of: session.id) {
-                        Text(pending)
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(Palette.waiting)
-                    } else {
-                        Text(Self.relative(session.updatedAt)).font(.caption).foregroundStyle(Palette.faint)
-                    }
+                if app.isPinned(session.id) && !archived {
+                    Image(systemName: "pin.fill").font(.caption2).foregroundStyle(Palette.faint)
+                }
+                if archived {
+                    Image(systemName: "archivebox").font(.caption).foregroundStyle(Palette.faint)
+                } else if let pending = app.pendingLabel(of: session.id) {
+                    Text(pending)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(Palette.waiting)
+                } else {
+                    Text(Self.relative(session.updatedAt)).font(.caption).foregroundStyle(Palette.faint)
                 }
             }
             .padding(.leading, indent ? 22 : 4)
@@ -585,7 +578,7 @@ struct DrawerView: View {
         .buttonStyle(.plain)
         .accessibilityAddTraits(current ? .isSelected : [])
         .swipeActions(edge: .leading) {
-            if !session.blank && !archived {
+            if !archived {
                 Button {
                     Haptics.tap()
                     Task { await app.setPinned(session.id, !app.isPinned(session.id)) }
@@ -597,17 +590,15 @@ struct DrawerView: View {
         }
         // No full swipe: a long leftward swipe is how the drawer closes, and must not archive.
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            if !session.blank {
-                Button {
-                    Haptics.tap()
-                    Task { if archived { await app.unarchive(session.id) } else { await app.archive(session.id) } }
-                } label: {
-                    Label(archived ? "取消归档" : "归档", systemImage: archived ? "tray.and.arrow.up" : "archivebox")
-                }
-                .tint(Palette.ink)
+            Button {
+                Haptics.tap()
+                Task { if archived { await app.unarchive(session.id) } else { await app.archive(session.id) } }
+            } label: {
+                Label(archived ? "取消归档" : "归档", systemImage: archived ? "tray.and.arrow.up" : "archivebox")
             }
+            .tint(Palette.ink)
         }
-        .contextMenu { if !session.blank { menu(for: session) } }
+        .contextMenu { menu(for: session) }
         .reportsFrame(session.id, to: rowFrames)
         // Outermost: below the frame report the list no longer sees them.
         .listRowInsets(EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 8))
