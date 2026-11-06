@@ -17,7 +17,7 @@ settings:
     # Changing it sends the TestFlight public beta back through review: a beta build bumps the build number.
     # App Store and GitHub releases do bump it, or the update check never sees them.
     MARKETING_VERSION: "1.0.0"
-    CURRENT_PROJECT_VERSION: "8"
+    CURRENT_PROJECT_VERSION: "9"
 targets:
   DshIOS:
     type: application
