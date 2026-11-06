@@ -214,6 +214,9 @@ struct ConversationView: View {
         .navigationTitle(titleBesideWorkbench ? "" : app.durableTitle(of: sessionId) ?? "")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(Palette.background, for: .navigationBar)
+        // Stated, not left to the default: the workbench's files and changes hide the bar of
+        // their own stacks, and without this closing the sheet takes this bar along.
+        .toolbar(.visible, for: .navigationBar)
         .toolbar {
             if let openDrawer {
                 ToolbarItem(placement: .topBarLeading) { DrawerButton(action: openDrawer) }
