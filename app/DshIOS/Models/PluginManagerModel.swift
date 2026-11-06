@@ -20,6 +20,8 @@ struct PluginRow: Identifiable, Hashable {
     var title: String { localized(meta["title"]) ?? moduleName }
     var summary: String? { localized(meta["description"]).flatMap { $0.isEmpty ? nil : $0 } }
     var locked: Bool { readOnlyReason != nil || entryId == nil }
+    /// Switched on and not running: it failed, or never got a fiber (a module that cannot be imported has none).
+    var stalled: Bool { enabled && (phase == "failed" || phase == nil) }
 
     /// The state line: off, or the phase its fiber is in.
     var stateText: String {
@@ -58,7 +60,9 @@ struct PluginPackage: Identifiable, Hashable {
     var readOnlyReason: String? { json["readOnlyReason"].string }
     var error: JSON? { json["error"].nonNull }
     var beta: Bool { name.hasPrefix("@deepseek-ai/dsh-experimental-") }
-    var problem: Bool { error != nil }
+    /// Switched on, yet a component of it is not running.
+    var stalled: Bool { enabled && rows.contains(where: \.stalled) }
+    var problem: Bool { error != nil || stalled }
 
     /// An on-demand official package whose installed version or source differs from what this DSH ships.
     var updateAvailable: Bool {
@@ -353,6 +357,21 @@ final class PluginManagerModel {
     /// A change the Host refused or could not apply.
     struct ChangeFailure: Error { let text: String }
 
+    /// Why enabling a package last failed. The Host says so only in the answer to the switch:
+    /// the list has nothing for a plugin that could not be imported, and it is gone after a restart.
+    private(set) var enableFailures: [String: String] = [:]
+
+    /// `applied` for a switch turned on: what it failed with stays for the detail page.
+    func appliedEnable(_ result: JSON, name: String, packageName: String) throws {
+        enableFailures[name] = nil
+        do {
+            try applied(result, packageName: packageName)
+        } catch let failure as ChangeFailure {
+            enableFailures[name] = failure.text
+            throw failure
+        }
+    }
+
     /// Publish a `ChangeResult`: a refusal throws; restart / overridden / cancelled toast.
     func applied(_ result: JSON, packageName: String) throws {
         switch result["application"].string {
@@ -377,7 +396,12 @@ final class PluginManagerModel {
         }
         await run(package.name, enabled ? .enable : .disable) {
             let result = try await app.client.call("pluginManager/setBundleEnabled", ["name": .string(package.name), "enabled": .bool(enabled)])
-            try applied(result, packageName: package.title)
+            if enabled {
+                try appliedEnable(result, name: package.name, packageName: package.title)
+            } else {
+                enableFailures[package.name] = nil
+                try applied(result, packageName: package.title)
+            }
         }
     }
 
@@ -394,6 +418,7 @@ final class PluginManagerModel {
     func uninstall(_ package: PluginPackage) async {
         await run(package.name, .uninstall) {
             let result = try await app.client.call("pluginManager/removeBundle", ["name": .string(package.name)])
+            enableFailures[package.name] = nil
             try applied(result, packageName: package.title)
         }
     }

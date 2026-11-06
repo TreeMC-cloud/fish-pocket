@@ -390,7 +390,9 @@ private struct PluginCard: View {
                 if manager.isBusy(package) {
                     ProgressView()
                 } else if package.availability != "missing" {
-                    Text(package.enabled ? "已启用" : "已停用").font(.footnote).foregroundStyle(Palette.secondary)
+                    Text(package.stalled ? "未运行" : package.enabled ? "已启用" : "已停用")
+                        .font(.footnote)
+                        .foregroundStyle(package.stalled ? Palette.removed : Palette.secondary)
                 }
             }
             .padding(.vertical, 3)
@@ -524,6 +526,7 @@ struct PluginDetailView: View {
         let lines: [String] = [
             package.metaError.map { String(localized: "包元信息错误：\($0)") },
             package.error.map { String(localized: "原因：\(managementText($0))") },
+            package.stalled ? manager.enableFailures[package.name].map { String(localized: "原因：\($0)") } : nil,
             package.readOnlyReason.map { managementText(code: $0) },
         ].compactMap { $0 }
         if !lines.isEmpty {
@@ -582,7 +585,7 @@ struct PluginDetailView: View {
 
     /// `共 {n} 个 · {n} 运行中 · {n} 已停用 · {n} 异常`: only the states that occur.
     private func partsSummary(_ rows: [PluginRow]) -> String {
-        let failed = rows.filter { $0.phase == "failed" }.count
+        let failed = rows.filter(\.stalled).count
         let off = rows.filter { !$0.enabled }.count
         let running = rows.filter { $0.enabled && $0.phase == "active" }.count
         var parts = [String(localized: "共 \(rows.count) 个")]
@@ -674,7 +677,7 @@ private struct PluginRowView: View {
                     }
                     HStack(spacing: 5) {
                         Circle().fill(dotColor).frame(width: 6, height: 6)
-                        Text(row.stateText).font(.caption).foregroundStyle(row.enabled && row.phase == "failed" ? Palette.removed : Palette.secondary)
+                        Text(row.stateText).font(.caption).foregroundStyle(row.stalled ? Palette.removed : Palette.secondary)
                     }
                 }
                 Spacer(minLength: 0)

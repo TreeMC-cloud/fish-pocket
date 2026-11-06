@@ -86,7 +86,10 @@ private struct ToastView: View {
         .accessibilityElement(children: .contain)
         .task {
             try? await Task.sleep(for: .seconds(toast.duration))
-            dismiss()
+            // Cancelled means this host went away, and the sleep returns at once: the toast
+            // itself is still due, on whichever host remains. Installing an enable failure
+            // raises it just as the install sheet closes.
+            if !Task.isCancelled { dismiss() }
         }
     }
 }
