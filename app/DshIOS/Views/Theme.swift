@@ -210,9 +210,14 @@ extension View {
 
     /// A close button for a view presented as a sheet (it may also be pushed, where it has none).
     func closeButton(_ dismiss: DismissAction) -> some View {
+        closeButton { dismiss() }
+    }
+
+    /// The same button, for a view its presenter closes.
+    func closeButton(action: @escaping () -> Void) -> some View {
         toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button { dismiss() } label: { Image(systemName: "xmark") }
+                Button(action: action) { Image(systemName: "xmark") }
                     .accessibilityLabel("关闭")
             }
         }
