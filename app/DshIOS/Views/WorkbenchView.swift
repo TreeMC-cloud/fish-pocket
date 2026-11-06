@@ -25,44 +25,39 @@ struct WorkbenchView: View {
     @Binding var browser: BrowserModel?
     let close: () -> Void
     @Environment(AppModel.self) private var app
+    @Environment(\.horizontalSizeClass) private var sizeClass
     /// A page is created on its first visit (the terminal only attaches then) and
     /// stays, so switching tabs leaves it where it was.
     @State private var visited: Set<WorkbenchTab> = []
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 4) {
-                ScrollViewReader { proxy in
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 2) {
-                        ForEach(WorkbenchTab.allCases) { item in
-                            Button { if tab != item { Haptics.select() }; tab = item } label: {
-                                Text(item.title)
-                                    .font(.subheadline.weight(tab == item ? .semibold : .medium))
-                                    .foregroundStyle(tab == item ? Palette.onInk : Palette.secondary)
-                                    .padding(.horizontal, 12)
-                                    .frame(minHeight: 36)
-                                    .background { if tab == item { Capsule().fill(Palette.ink) } }
-                                    .hitTarget()
-                            }
-                            .buttonStyle(.plain)
-                            .id(item)
-                            .accessibilityAddTraits(tab == item ? [.isSelected, .isButton] : .isButton)
-                        }
-                    }
+        Group {
+            // Beside the conversation, its toolbar button opens and closes this.
+            if sizeClass == .regular {
+                content
+            } else {
+                NavigationStack {
+                    content
+                        .navigationTitle("工作台")
+                        .navigationBarTitleDisplayMode(.inline)
+                        // Stated, as in the conversation: the files and changes pages hide the bar
+                        // of their own stacks, and that would take this one, with ✕, along.
+                        .toolbar(.visible, for: .navigationBar)
+                        .closeButton(action: close)
                 }
-                .onChange(of: tab) { _, item in withAnimation(.snappy) { proxy.scrollTo(item) } }
-                }
-                Button(action: close) {
-                    Image(systemName: "xmark").font(.system(size: 17)).foregroundStyle(Palette.ink)
-                        .frame(width: 44, height: 44).contentShape(Rectangle())
-                }
-                .accessibilityLabel("关闭")
             }
-            .padding(.leading, 12)
-            .padding(.trailing, 4)
-            .padding(.top, 14)
+        }
+        .onChange(of: tab, initial: true) { _, selected in
+            // A keyboard belongs to the tab that raised it.
+            dismissKeyboard()
+            visited.insert(selected)
+            if selected == .browser, browser == nil { browser = BrowserModel(sessionId: model.sessionId, origin: app.client.origin) }
+        }
+    }
 
+    private var content: some View {
+        VStack(spacing: 0) {
+            tabs
             ZStack {
                 page(.terminal) { WorkbenchTerminal(sessionId: model.sessionId) }
                 page(.files) { WorkbenchFiles(model: model) }
@@ -72,12 +67,32 @@ struct WorkbenchView: View {
             }
         }
         .background(Palette.background)
-        .onChange(of: tab, initial: true) { _, selected in
-            // A keyboard belongs to the tab that raised it.
-            dismissKeyboard()
-            visited.insert(selected)
-            if selected == .browser, browser == nil { browser = BrowserModel(sessionId: model.sessionId, origin: app.client.origin) }
+    }
+
+    private var tabs: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 2) {
+                    ForEach(WorkbenchTab.allCases) { item in
+                        Button { if tab != item { Haptics.select() }; tab = item } label: {
+                            Text(item.title)
+                                .font(.subheadline.weight(tab == item ? .semibold : .medium))
+                                .foregroundStyle(tab == item ? Palette.onInk : Palette.secondary)
+                                .padding(.horizontal, 12)
+                                .frame(minHeight: 36)
+                                .background { if tab == item { Capsule().fill(Palette.ink) } }
+                                .hitTarget()
+                        }
+                        .buttonStyle(.plain)
+                        .id(item)
+                        .accessibilityAddTraits(tab == item ? [.isSelected, .isButton] : .isButton)
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+            .onChange(of: tab) { _, item in withAnimation(.snappy) { proxy.scrollTo(item) } }
         }
+        .padding(.vertical, 8)
     }
 
     @ViewBuilder
@@ -371,7 +386,8 @@ private struct WorkbenchFiles: View {
             DirectoryView(
                 sessionId: model.sessionId,
                 path: ".",
-                title: model.workingDirectory.map { URL(fileURLWithPath: $0).lastPathComponent } ?? String(localized: "文件"),
+                // This title reaches the sheet's bar; the folder is named by the path under the tabs.
+                title: String(localized: "工作台"),
                 root: model.workingDirectory,
                 modified: Set(FileChange.collect(model.items.allBlocks, root: model.workingDirectory).map(\.path))
             )
