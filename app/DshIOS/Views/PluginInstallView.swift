@@ -611,6 +611,20 @@ private struct InstallFailed: View {
                     Text("只在信任这些包时允许。").font(.footnote.weight(.medium)).foregroundStyle(Palette.secondary)
                     Button("允许这些脚本并重试") { Task { await task.approveBuildsAndRetry() } }
                         .buttonStyle(.capsule(height: 44))
+                    Button("跳过脚本并继续") { Task { await task.skipBuildsAndRetry() } }
+                        .buttonStyle(.capsule(.outline, height: 44))
+                    Text("跳过后插件仍可安装，依赖这些脚本的功能可能用不了。").font(.footnote).foregroundStyle(Palette.secondary)
+                }
+                .padding(12)
+                .background(Palette.waiting.opacity(0.1), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            } else if !task.skippableBuilds.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("安装脚本运行失败").font(.subheadline.weight(.semibold))
+                    Text("以下包的脚本没能运行，它们可能不支持 iOS。").font(.footnote).foregroundStyle(Palette.secondary)
+                    Text(task.skippableBuilds.joined(separator: "\n")).font(.caption.monospaced())
+                    Button("跳过脚本并继续") { Task { await task.skipBuildsAndRetry() } }
+                        .buttonStyle(.capsule(height: 44))
+                    Text("跳过后插件仍可安装，依赖这些脚本的功能可能用不了。").font(.footnote).foregroundStyle(Palette.secondary)
                 }
                 .padding(12)
                 .background(Palette.waiting.opacity(0.1), in: RoundedRectangle(cornerRadius: 12, style: .continuous))

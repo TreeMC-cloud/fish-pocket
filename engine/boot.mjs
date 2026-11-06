@@ -9,6 +9,7 @@ import { installChildProcess } from './runtime/child-process.mjs';
 import { installModuleRedirects } from './runtime/module-redirects.mjs';
 import { installWorkerDefaults } from './runtime/worker-defaults.mjs';
 import { installSegmenter } from './runtime/intl-segmenter.mjs';
+import { installTextDecoder } from './runtime/text-decoder.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -49,6 +50,8 @@ if (port !== preferred) console.log(`[dsh-ios] port ${preferred} is taken; liste
 
 // small-icu: the native Intl.Segmenter crashes the app (runtime/intl-segmenter.mjs).
 installSegmenter();
+// small-icu: no GBK, which plugins written for desktop expect (runtime/text-decoder.mjs).
+installTextDecoder();
 installWorkerDefaults();
 // No processes on iOS: child_process runs node/pnpm as worker threads and
 // everything else through the in-process shell (runtime/).

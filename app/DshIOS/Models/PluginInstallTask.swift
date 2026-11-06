@@ -638,6 +638,29 @@ final class PluginInstallTask {
         await startInstall(subject, approved: pending)
     }
 
+    /// The build scripts 跳过脚本并继续 turns off: those waiting for a decision, else those that ran and failed.
+    var skippableBuilds: [String] {
+        guard phase == .failed, let failure else { return [] }
+        if !failure.pendingBuilds.isEmpty { return failure.pendingBuilds }
+        return Self.failedBuilds(in: runs.map(\.output).joined(separator: "\n"))
+    }
+
+    /// The packages pnpm reports as `node_modules/<name> postinstall: Failed`.
+    static func failedBuilds(in output: String) -> [String] {
+        let line = /^\S*node_modules\/((?:@[^\/\s]+\/)?[^\/\s]+) (?:preinstall|install|postinstall|prepare): Failed\s*$/.anchorsMatchLineEndings()
+        var names: [String] = []
+        for match in output.matches(of: line) where !names.contains(String(match.1)) { names.append(String(match.1)) }
+        return names
+    }
+
+    /// 跳过脚本并继续: install again with these scripts off. The plugin manager can only allow
+    /// a script; `ios-host` reads a `!` as refusing it, which the profile then remembers.
+    func skipBuildsAndRetry() async {
+        let skipped = skippableBuilds
+        guard let subject, !skipped.isEmpty else { return }
+        await startInstall(subject, approved: skipped.map { "!\($0)" })
+    }
+
     /// 重试 from the failed screen.
     func retry() {
         guard phase == .failed else { return }
@@ -684,7 +707,7 @@ final class PluginInstallTask {
         if let name = installed {
             do {
                 let result = try await app.client.call("pluginManager/setBundleEnabled", ["name": .string(name), "enabled": true])
-                try app.plugins.applied(result, packageName: app.plugins.package(name)?.title ?? name)
+                try app.plugins.appliedEnable(result, name: name, packageName: app.plugins.package(name)?.title ?? name)
             } catch let failure as PluginManagerModel.ChangeFailure {
                 app.showToast(PluginAction.enable.failed(failure.text), duration: 6)
             } catch {

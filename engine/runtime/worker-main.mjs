@@ -10,6 +10,16 @@ import { installChildProcess } from './child-process.mjs';
 import { emulateCwd } from './worker-cwd.mjs';
 import { installWorkerDefaults } from './worker-defaults.mjs';
 import { installSegmenter } from './intl-segmenter.mjs';
+import { installTextDecoder } from './text-decoder.mjs';
+
+/**
+ * The file `node <script>` runs: the CLI finds it as require() does, so
+ * `node scripts/postinstall` reaches postinstall.js, while import() takes a path
+ * literally. A script that cannot be found is left to import() to report.
+ */
+function entryOf(script) {
+  try { return createRequire(script).resolve(script); } catch { return script; }
+}
 
 emulateCwd(workerData.cwd);
 process.argv[1] = workerData.script ?? '[eval]';
@@ -35,12 +45,13 @@ if (workerData.ipc) {
   parentPort.unref();
 }
 installSegmenter();
+installTextDecoder();
 // Children of this child go through the same emulation.
 installWorkerDefaults();
 installChildProcess();
 
 if (workerData.script !== undefined) {
-  await import(pathToFileURL(workerData.script).href);
+  await import(pathToFileURL(entryOf(workerData.script)).href);
 } else {
   const filename = path.join(process.cwd(), '[eval]');
   const require = createRequire(filename);

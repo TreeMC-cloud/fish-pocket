@@ -23,7 +23,7 @@ libgit2 的完整许可证见其仓库的 [COPYING](https://github.com/libgit2/l
 
 | 许可证 | 包数量 |
 |---|---|
-| MIT | 566 |
+| MIT | 568 |
 | Apache-2.0 | 59 |
 | ISC | 23 |
 | BSD-3-Clause | 19 |

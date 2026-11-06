@@ -31,6 +31,18 @@ test('node children read piped stdin and see their cwd', async () => {
   assert.equal(out.trim(), `${dir} HELLO`);
 });
 
+test('node finds a script the way the CLI does: extension, directory index', async () => {
+  const dir = tmp();
+  fs.mkdirSync(path.join(dir, 'scripts'));
+  fs.mkdirSync(path.join(dir, 'tool'));
+  fs.writeFileSync(path.join(dir, 'scripts', 'postinstall.js'), 'console.log("ran", process.argv[1]);');
+  fs.writeFileSync(path.join(dir, 'tool', 'index.js'), 'console.log("index");');
+  const named = await execFile('node', ['scripts/postinstall'], { cwd: dir });
+  assert.equal(named.stdout.trim(), `ran ${path.join(dir, 'scripts', 'postinstall')}`);
+  assert.equal((await execFile('node', ['tool'], { cwd: dir })).stdout.trim(), 'index');
+  await assert.rejects(execFile('node', ['scripts/missing'], { cwd: dir }), /Cannot find module/);
+});
+
 test('node children resolve bare relative fs paths against their cwd', async () => {
   const dir = tmp();
   fs.mkdirSync(path.join(dir, 'sub'));
