@@ -90,6 +90,30 @@ description: 防止 AI 之间无限往返、防止长任务把余额烧光。什
 
 ---
 
+## 两个工具：派活前查负载，干活时盯轮次
+
+### 派活前：现在能不能再派
+
+```sh
+node "$DSH_TOOLS/cost-guard/load.mjs" check
+```
+
+退出码 0 = 能派，1 = 别派（会给出具体理由，如「可用内存 412MB / 4096MB，低于 15% 红线」）。
+
+在 iOS 上这条尤其重要：**手机内存被系统严格限制，多个子 agent 并行容易被静默杀掉**——表现为「App 突然回到桌面」，用户完全不知道发生了什么。
+
+### 干活时：是不是该换会话了
+
+```sh
+node "$DSH_TOOLS/cost-guard/turns.mjs" tick          # 每轮记一次
+node "$DSH_TOOLS/cost-guard/turns.mjs" status        # 看还剩多少余量
+node "$DSH_TOOLS/cost-guard/turns.mjs" reset --reason "已交接"   # 换会话后归零
+```
+
+三条红线（可用环境变量改）：**40 轮 / 20 万 token / 3 小时**。超了退出码 1，并提醒先写交接再换。
+
+**为什么 40 轮**：轮次越多，每一轮都要把历史重新读一遍。40 轮后，重复读取的成本已经超过任务本身。
+
 ## 派活前先算账
 
 动手前问三句：
