@@ -290,6 +290,13 @@ struct RemoteWorkbenchPage: View {
 
     /// 写 user.patch.yml。条目 id 固定，重复保存是覆盖而非叠加。
     private func write(base: String, token: String) throws {
+        // 两段拼接，而不是合并成一个模板字符串。
+        //
+        // 原因：Swift 多行字符串按**结束引号的缩进**剥掉每行前缀。
+        // headers 需要 16 空格（和 serverName 同级），
+        // 而模板结束符在 8 空格处，合并后 headers 会被剥成 8 空格，
+        // 反而变成 config 的父级 —— YAML 直接错。
+        // 拼接写法接缝处会有两个空行，但 YAML 语义是对的，可读性让位于正确性。
         var yaml = """
         # 由 App 的「远程工作台」设置页维护。清空地址会删除本文件。
         # 这一层叠在 app 自带的 ios.patch.yml 之后（见 engine/boot.mjs）。
@@ -311,6 +318,7 @@ struct RemoteWorkbenchPage: View {
 
             """
         }
+
         try FileManager.default.createDirectory(
             at: patchURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
