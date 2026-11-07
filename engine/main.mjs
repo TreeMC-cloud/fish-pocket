@@ -103,6 +103,12 @@ function start() {
   });
   engine.on('message', (message) => {
     if (message?.type === 'dsh-ios/restart') void restart(message.reason);
+    // 自动守卫的提醒：写进 engine.log，用户能在「关于 → 引擎日志」里看到。
+    // 不弹 toast 是有意的——这些提醒是"该做什么了"，不是错误，
+    // 频繁弹窗会让人关掉通知，反而什么都看不到。
+    if (message?.type === 'dsh-ios/notice') {
+      console.warn(`[auto-guard] ${message.level ?? 'info'}: ${message.message ?? ''}`);
+    }
   });
   engine.on('error', (error) => console.error('[dsh-ios] engine error', error));
   engine.on('exit', (code) => {
