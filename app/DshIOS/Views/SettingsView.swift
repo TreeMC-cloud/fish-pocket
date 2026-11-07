@@ -21,6 +21,8 @@ struct SettingsView: View {
     @AppStorage(BackgroundKeeper.enabledKey) private var keepAlive = true
     @State private var confirmingKeepAliveOff = false
     @AppStorage(BackgroundKeeper.continuedKey) private var continuedProcessing = false
+    /// 设置页里就能开第三方接入，不用先进「模型」再找。
+    @State private var addingThirdParty = false
 
     private var mirror: SettingsMirror { app.settings }
 
@@ -43,6 +45,15 @@ struct SettingsView: View {
                         valueRow("账号", app.account.signedIn ? (app.account.displayName ?? String(localized: "已登录")) : String(localized: "未登录"))
                     }
                     NavigationLink { ModelProvidersPage() } label: { valueRow("模型", defaultModel ?? "") }
+                    Button { addingThirdParty = true } label: {
+                        HStack {
+                            Text("添加第三方 API").foregroundStyle(Palette.ink)
+                            Spacer()
+                            Text("中转站 / 自建服务").font(.footnote).foregroundStyle(Palette.secondary)
+                            Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Palette.faint)
+                        }
+                    }
+                    .disabled(!mirror.writable)
                     if mirror.serves("permission") { permissionPicker }
                     if let theme = mirror.namespace("ui-theme") {
                         Picker("外观", selection: Binding(get: { theme["value"]["preference"].string ?? "system" }, set: { value in
@@ -117,6 +128,10 @@ struct SettingsView: View {
             .navigationTitle("设置")
             .navigationBarTitleDisplayMode(.large)
             .closeButton(dismiss)
+            .sheet(isPresented: $addingThirdParty) {
+                ThirdPartyAPISheet()
+                    .sheetNotices()
+            }
             .alert("启用完全权限？", isPresented: $confirmingFullAccess) {
                 Button("取消", role: .cancel) {}
                 Button("启用", role: .destructive) { Task { await write("permission", ["defaultPreset"], "danger-full-access") } }
