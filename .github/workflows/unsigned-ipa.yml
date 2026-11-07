@@ -91,6 +91,18 @@ jobs:
           command -v xcodegen >/dev/null || brew install xcodegen
           cd app && xcodegen generate --quiet
 
+      # CI 提速：Xcode 增量编译缓存。DerivedData 整目录缓存，键含全部
+      # Swift 源码哈希 —— 改代码自动失效，没改则 xcodebuild 直接走增量。
+      # 注意 workflow 自身的改动不影响缓存键，逻辑变化靠 concurrency 取消旧跑。
+      - name: Cache Xcode DerivedData
+        id: xcodecache
+        uses: actions/cache@v5
+        with:
+          path: app/build/DerivedData
+          key: xcode-${{ hashFiles('app/DshIOS/**', 'app/LiveActivity/**', 'app/Shared/**', 'app/project.yml') }}
+          restore-keys: |
+            xcode-
+
       # 关键：-sdk iphoneos + 关闭签名。ARCHS=arm64 避开 x86_64 切片。
       - name: Build (device, unsigned)
         working-directory: app
@@ -136,7 +148,7 @@ jobs:
           mkdir -p build/Payload build/ipa
           cp -R "$APP" build/Payload/
           cd build
-          zip -qry ipa/DshIOS-unsigned.ipa Payload
+          zip -qry -0 ipa/DshIOS-unsigned.ipa Payload
           cd ..
           ls -la build/ipa/
           unzip -l build/ipa/DshIOS-unsigned.ipa | head -15
