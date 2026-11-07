@@ -27,6 +27,8 @@ struct SignInSheet: View {
     var autoStart = false
     /// The API Key alternative; nil hides it.
     var addAPIKey: (() -> Void)?
+    /// The third-party route (中转站 / 自建服务); nil hides it.
+    var addThirdParty: (() -> Void)?
 
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
@@ -94,7 +96,7 @@ struct SignInSheet: View {
                         .disabled(account.authorizeURL(colorScheme) == nil)
                 }
             } else {
-                Text("登录 DeepSeek 账号，或添加 API Key，即可开始使用。你的项目和文件保存在本地。")
+                Text("登录 DeepSeek 账号，或添加 API Key 即可开始使用。也可以直接接自己的中转站。你的项目和文件保存在本地。")
             }
         }
         .font(.subheadline)
@@ -112,22 +114,36 @@ struct SignInSheet: View {
 
     @ViewBuilder
     private var actions: some View {
-        HStack(spacing: 12) {
-            if account.attemptActive {
-                Button("取消") { Task { await account.cancelSignIn() } }
-                    .buttonStyle(.capsule(.outline))
-                    .disabled(phase == "committing")
-                Button("打开浏览器") { account.authorizeURL(colorScheme).map(openBrowser) }
-                    .buttonStyle(.capsule())
-                    .disabled(phase == "committing" || account.authorizeURL(colorScheme) == nil)
-            } else {
-                if let addAPIKey {
-                    Button("添加 API Key") { dismiss(); addAPIKey() }
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                if account.attemptActive {
+                    Button("取消") { Task { await account.cancelSignIn() } }
                         .buttonStyle(.capsule(.outline))
+                        .disabled(phase == "committing")
+                    Button("打开浏览器") { account.authorizeURL(colorScheme).map(openBrowser) }
+                        .buttonStyle(.capsule())
+                        .disabled(phase == "committing" || account.authorizeURL(colorScheme) == nil)
+                } else {
+                    if let addAPIKey {
+                        Button("添加 API Key") { dismiss(); addAPIKey() }
+                            .buttonStyle(.capsule(.outline))
+                    }
+                    Button(phase == "expired" || phase == "failed" || localFailed ? "重新登录" : "登录") { Task { await start() } }
+                        .buttonStyle(.capsule())
+                        .disabled(busy)
                 }
-                Button(phase == "expired" || phase == "failed" || localFailed ? "重新登录" : "登录") { Task { await start() } }
-                    .buttonStyle(.capsule())
-                    .disabled(busy)
+            }
+            if let addThirdParty, !account.attemptActive {
+                Button {
+                    dismiss()
+                    addThirdParty()
+                } label: {
+                    Text("使用第三方 API（中转站 / 自建服务）")
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(Palette.secondary)
+                }
+                .buttonStyle(.plain)
+                .disabled(busy)
             }
         }
     }
