@@ -1,5 +1,7 @@
 # 全局铁律
 
+文件来源：用户 2026-11-08：「这些规则每轮都会注入，所以必须极短」+ 移植自 luanyujia-workbench 与官方 super-agent 设计原则
+
 > 这些规则每轮都会注入，所以必须极短。细则在 skills/ 里，按需加载。
 > 来源：DeepSeek 官方 super-agent 设计原则 + luanyujia-workbench 实践。
 
