@@ -27,11 +27,16 @@ struct SettingsView: View {
     private var mirror: SettingsMirror { app.settings }
 
     /// 「远程工作台」这一行显示的状态：留空即纯本地，配了地址就显示主机名。
-    /// 只读 user.patch.yml 的 url 字段，不解析整个文件。
-    private var remoteWorkbenchSummary: String {
+    /// 只在页面出现和设置变更时算一次，不是每次渲染都读盘——
+    /// 计算属性会在每次 SwiftUI 重绘时同步读文件，设置页刷新很频繁，会卡住主线程。
+    @State private var remoteWorkbenchSummary = String(localized: "纯本地")
+
+    /// 从 user.patch.yml 里取 url 字段的主机名。只扫行，不解析整个 YAML。
+    private func loadRemoteWorkbenchSummary() {
         let url = EnginePaths.real(EnginePaths.shared).appendingPathComponent("user.patch.yml")
         guard let text = try? String(contentsOf: url, encoding: .utf8) else {
-            return String(localized: "纯本地")
+            remoteWorkbenchSummary = String(localized: "纯本地")
+            return
         }
         for line in text.split(separator: "\n") {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
@@ -39,10 +44,10 @@ struct SettingsView: View {
             let raw = String(trimmed.dropFirst(4)).trimmingCharacters(in: .whitespaces)
                 .replacingOccurrences(of: "\"", with: "")
                 .replacingOccurrences(of: "/mcp", with: "")
-            if let host = URL(string: raw)?.host { return host }
-            return raw.isEmpty ? String(localized: "纯本地") : raw
+            remoteWorkbenchSummary = URL(string: raw)?.host ?? (raw.isEmpty ? String(localized: "纯本地") : raw)
+            return
         }
-        return String(localized: "纯本地")
+        remoteWorkbenchSummary = String(localized: "纯本地")
     }
 
     private var engineRunning: Bool {
@@ -162,7 +167,10 @@ struct SettingsView: View {
             }
             .followSettings()
             .task { await load() }
-            .task(id: app.settingsRevision) { await loadDerived() }
+            .task(id: app.settingsRevision) {
+                await loadDerived()
+                loadRemoteWorkbenchSummary()
+            }
             .task(id: app.revision("permission-presets/catalog-changed")) { await loadPermissions() }
         }
     }
