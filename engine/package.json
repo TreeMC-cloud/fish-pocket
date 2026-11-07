@@ -7,7 +7,6 @@
     "just-bash": "3.6.0",
     "meow-memory": "0.32.6",
     "node-addon-require-builtin-ios-arm64": "file:./shims/node-addon-require-builtin-ios-arm64",
-    "pnpm": "11.28.5",
     "@deepseek-ai/dsh-llm": "file:./shims/dsh-llm-min",
     "@deepseek-ai/schemastery": "3.19.0",
     "@deepseek-ai/cordis": "4.1.0",
@@ -18,9 +17,6 @@
     "@deepseek-ai/cordis-plugin-group": "1.1.0",
     "@deepseek-ai/dsh-home-paths": "0.2.2-rc.1",
     "@deepseek-ai/dsh-launch-environment": "0.2.2-rc.1"
-  },
-  "overrides": {
-    "zod": "4.6.7"
   },
   "scripts": {
     "test": "node --test test/*.test.mjs"
