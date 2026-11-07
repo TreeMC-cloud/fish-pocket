@@ -95,4 +95,5 @@ node "$DSH_TOOLS/dispatch-protocol/sentinel.mjs" open   # 我发出没回的
 | `scene` | 开场认领身份：我在哪个工作区、负责什么、不碰什么 |
 | `rotate` | 会话干太久了，写交接然后换 |
 | `shared` | 跨场景的待办 / 通知 / 索引 |
+| `preferences` | 记「你喜欢怎样」：叫法、格式、边界 |
 | `ios-environment` | 不确定某个 shell 命令能不能用 |
