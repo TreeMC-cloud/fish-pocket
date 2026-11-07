@@ -4,12 +4,12 @@
 // the iOS overlay.
 import net from 'node:net';
 import path from 'node:path';
+import { existsSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { installChildProcess } from './runtime/child-process.mjs';
 import { installModuleRedirects } from './runtime/module-redirects.mjs';
 import { installWorkerDefaults } from './runtime/worker-defaults.mjs';
 import { installSegmenter } from './runtime/intl-segmenter.mjs';
-import { installTextDecoder } from './runtime/text-decoder.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -50,8 +50,6 @@ if (port !== preferred) console.log(`[dsh-ios] port ${preferred} is taken; liste
 
 // small-icu: the native Intl.Segmenter crashes the app (runtime/intl-segmenter.mjs).
 installSegmenter();
-// small-icu: no GBK, which plugins written for desktop expect (runtime/text-decoder.mjs).
-installTextDecoder();
 installWorkerDefaults();
 // No processes on iOS: child_process runs node/pnpm as worker threads and
 // everything else through the in-process shell (runtime/).
@@ -67,11 +65,19 @@ if (process.env.DSH_IOS_DEBUG === '1') {
 process.on('uncaughtException', (error) => console.error('[dsh-ios] uncaught', error));
 process.on('unhandledRejection', (error) => console.error('[dsh-ios] unhandled rejection', error));
 
+/// 用户自己的 patch 层：远程工作台等连接配置由 App 写在这里。
+/// 放在可写的数据目录，和随包分发的只读 ios.patch.yml 分开。
+const userPatch = path.join(process.env.DSH_IOS_DATA, 'user.patch.yml');
+
 process.argv = [
   process.execPath,
   path.join(here, 'node_modules/@deepseek-ai/dsh/lib/bin.js'),
   'web',
   '--patch', path.join(here, 'ios.patch.yml'),
+  // 用户自己的叠加层：远程工作台等连接配置写在这里，位于可写的数据目录。
+  // 文件不存在时跳过——`--patch` 指向缺失路径会让 dsh 直接报错退出，
+  // 而"没配过远程工作台"是最常见的情况，不能因此起不来。
+  ...(existsSync(userPatch) ? ['--patch', userPatch] : []),
   // argv is strings; `pick` returns a number.
   '--no-open', '--host', '127.0.0.1', '--port', String(port),
 ];
