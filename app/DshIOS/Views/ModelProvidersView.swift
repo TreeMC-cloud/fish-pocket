@@ -65,6 +65,30 @@ final class ModelProvidersModel {
     private(set) var error: String?
     private(set) var credentialError: String?
 
+    /// 只为「新提供商取一个不撞号的 ID」而读路由：不碰凭据状态，也不必等目录页
+    /// 那套完整的开销——从主界面直达的接入页只需要 `rows` 里的 provider。
+    func loadRoutes(_ app: AppModel) async {
+        guard rows.isEmpty else { return }
+        async let registeredRead = app.client.call("llm/listProviders")
+        async let directoryRead = app.client.call("llm/listConfigurableProviders")
+        guard let (registered, directory) = try? await (registeredRead, directoryRead) else { return }
+        let active = Set(registered.array.compactMap { $0["id"].string })
+        var entries = directory.array.map { $0.setting(["active"], .bool(active.contains($0["provider"].string ?? ""))) }
+        let declared = Set(directory.array.compactMap { $0["provider"].string })
+        for provider in registered.array where !declared.contains(provider["id"].string ?? "") {
+            entries.append(["provider": provider["id"], "displayName": provider["name"], "settingsNs": "", "settingsPath": [], "active": true])
+        }
+        rows = entries.map { entry in
+            ProviderRow(
+                entry: entry,
+                active: entry["active"].bool ?? false,
+                configured: true,
+                removable: false,
+                apiKeyEnv: nil
+            )
+        }
+    }
+
     func load(_ app: AppModel) async {
         loading = true
         defer { loading = false }
@@ -144,6 +168,7 @@ struct ModelProvidersPage: View {
     @State private var deleteTarget: ProviderRow?
     @State private var deleting = false
     @State private var adding = false
+    @State private var quickAdding = false
     @State private var defaultModel: String?
 
     var body: some View {
@@ -177,10 +202,28 @@ struct ModelProvidersPage: View {
                 }
                 .groupedRow()
                 Section {
+                    Button { quickAdding = true } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "bolt.horizontal.circle.fill")
+                                .foregroundStyle(Palette.ink)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("添加第三方 API").foregroundStyle(Palette.ink)
+                                Text("中转站 / 自建服务，填地址和密钥即可")
+                                    .font(.caption).foregroundStyle(Palette.secondary)
+                            }
+                            Spacer(minLength: 8)
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(Palette.faint)
+                        }
+                    }
+                    .disabled(!app.settings.writable)
                     Button { adding = true } label: {
                         Label("添加模型提供商", systemImage: "plus").foregroundStyle(Palette.ink)
                     }
                     .disabled(!app.settings.writable)
+                } footer: {
+                    Text("「添加第三方 API」自动识别 OpenAI / Anthropic 协议并取回模型列表，保存后直接设为默认模型。")
                 }
                 .groupedRow()
             }
@@ -189,6 +232,7 @@ struct ModelProvidersPage: View {
         .navigationTitle("模型")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $adding) { AddProviderSheet(model: model) }
+        .sheet(isPresented: $quickAdding) { QuickProviderSheet(model: model) }
         .task(id: app.settingsRevision) {
             await model.load(app)
             await loadDefaultModel()
@@ -1226,6 +1270,7 @@ private struct AddProviderSheet: View {
     @Environment(\.dismiss) private var dismiss
     let model: ModelProvidersModel
     @State private var addable: [ProviderRow]?
+    @State private var quick = false
 
     private var piAi: JSON? { app.settings.namespace("llm-pi-ai") }
     private var protocols: [String] { app.settings.graph("llm-pi-ai").map(protocolChoices) ?? [] }
@@ -1233,6 +1278,16 @@ private struct AddProviderSheet: View {
     var body: some View {
         NavigationStack {
             List {
+                if piAi != nil || app.settings.serves("llm-pi-ai") {
+                    Section {
+                        Button { quick = true } label: {
+                            Label("第三方 API", systemImage: "bolt.horizontal").foregroundStyle(Palette.ink)
+                        }
+                    } footer: {
+                        Text("中转站、自建服务、任意兼容 OpenAI 或 Anthropic 的接口。填地址和密钥即可，协议自动识别。")
+                    }
+                    .groupedRow()
+                }
                 if let addable {
                     Section("选择提供商") {
                         if addable.isEmpty {
@@ -1250,14 +1305,14 @@ private struct AddProviderSheet: View {
                 }
                 if let piAi {
                     Section {
-                        NavigationLink("自定义 API") {
+                        NavigationLink("自定义 API（分步）") {
                             CustomProviderForm(model: model, namespace: piAi, protocols: protocols, reasoningLevels: app.settings.graph("llm-pi-ai").map(reasoningLevelChoices) ?? [], onAdded: { dismiss() })
                                 .navigationTitle("自定义 API")
                                 .navigationBarTitleDisplayMode(.inline)
                                 .keyboardDoneButton()
                         }
                     } footer: {
-                        Text("中转站、自部署服务等兼容 OpenAI 或 Anthropic 协议的接口。")
+                        Text("要指定提供商 ID、逐个挑选模型或声明推理等级时用它。")
                     }
                     .groupedRow()
                 }
@@ -1267,6 +1322,9 @@ private struct AddProviderSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+            }
+            .navigationDestination(isPresented: $quick) {
+                QuickProviderSheet(model: model, onAdded: { dismiss() }, embedded: true)
             }
         }
         .tint(Palette.ink)
