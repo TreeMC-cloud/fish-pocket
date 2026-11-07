@@ -11,7 +11,6 @@ import SwiftUI
 /// 连不上不是错误状态——`failOnStartupError: false` 让引擎照常启动，只是没有远程工具。
 struct RemoteWorkbenchPage: View {
     @Environment(AppModel.self) private var app
-    @EnvironmentObject private var engine: NodeEngine
 
     @State private var endpoint = ""
     @State private var token = ""
@@ -89,6 +88,10 @@ struct RemoteWorkbenchPage: View {
                         }
                     }
                 }
+            } footer: {
+                if active, !restartNeeded {
+                    Text("测试连接只验证服务器可达。Agent 是否已拿到远程工具，要看重启后工具列表里有没有 mcp__workbench__ 开头的工具。")
+                }
             }
             .groupedRow()
 
@@ -104,6 +107,22 @@ struct RemoteWorkbenchPage: View {
                 }
                 .disabled(busy || !active)
 
+                if restartNeeded {
+                    Button {
+                        restartNeeded = false
+                        Task { await restartEngine() }
+                    } label: {
+                        HStack {
+                            Text("应用配置").foregroundStyle(Palette.ink)
+                            Spacer()
+                            Image(systemName: "arrow.clockwise")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(Palette.faint)
+                        }
+                    }
+                    .disabled(busy)
+                }
+
                 if active {
                     Button(role: .destructive) {
                         Task { await disable() }
@@ -114,7 +133,7 @@ struct RemoteWorkbenchPage: View {
                 }
             } footer: {
                 if restartNeeded {
-                    Text("已保存。重启引擎后生效。").foregroundStyle(Palette.waiting)
+                    Text("配置已保存。重启引擎后，Agent 才会拿到远程工具。").foregroundStyle(Palette.waiting)
                 } else if active {
                     Text("已启用：Agent 可以使用远程工作台的工具（提交任务、查进度、记忆、技能）。")
                 } else {
@@ -221,11 +240,17 @@ struct RemoteWorkbenchPage: View {
             endpoint = base
             restartNeeded = true
             Haptics.success()
-            app.showToast(String(localized: "已保存，重启引擎后生效。"))
+            app.showToast(String(localized: "已保存。重启 App 后 Agent 会拿到远程工具。"))
         } catch {
             Haptics.error()
             failure = error.localizedDescription
         }
+    }
+
+    /// 引擎只在启动时读 user.patch.yml，所以改完配置要重开一次 App。
+    /// iOS 不允许 App 自重启，这里只能把话说清楚，让用户按提示操作。
+    private func restartEngine() async {
+        app.showToast(String(localized: "请从后台划掉本 App 再重新打开，配置即生效。"), duration: 6)
     }
 
     private func disable() async {
