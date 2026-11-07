@@ -25,6 +25,17 @@ const dirs = home
   : { DSH_HOME: path.join(data, 'dsh'), HOME: path.join(data, 'home'), TMPDIR: path.join(data, 'tmp'), workspace: path.join(data, 'workspace') };
 for (const dir of Object.values(dirs)) fs.mkdirSync(dir, { recursive: true });
 
+// 全局铁律：随包分发的 AGENTS.md 复制到 $DSH_HOME/AGENTS.md，每轮注入。
+// dsh-agent-instructions 只读 $DSH_HOME/AGENTS.md 这一处，不读包内路径；
+// 每次启动都覆盖写，这样 App 升级后铁律跟着更新，用户改的东西留在别处不动。
+const rules = path.join(path.dirname(fileURLToPath(import.meta.url)), 'AGENTS.md');
+const rulesTarget = path.join(dirs.DSH_HOME, 'AGENTS.md');
+try {
+  if (fs.existsSync(rules)) fs.copyFileSync(rules, rulesTarget);
+} catch (error) {
+  console.error('[dsh-ios] could not install AGENTS.md', error);
+}
+
 // The engine's environment, not this thread's: that one is the process's, and
 // the system frameworks in the process read HOME and TMPDIR, which stay real.
 const env = {
