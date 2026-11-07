@@ -33,7 +33,25 @@ cp -R "$src/skills" "$out/skills"
 # 上一版就是这样缺了 @deepseek-ai/cordis-plugin-group，引擎起不来。
 # 现在的做法是显式声明所有 peer，并把 dsh-llm 换成本地最小 shim
 # （file:./shims/dsh-llm-min），从根上消除版本冲突，严格解析就能过。
-(cd "$out" && npm install --omit=dev --os=ios --cpu=arm64 --ignore-scripts --no-audit --no-fund --loglevel=error)
+# 双保险：严格装失败（含 npm 自身崩溃，如 null reading 'matches'）时
+# 自动降级到 --legacy-peer-deps 重试一次 —— 现在 5 个 peer 是显式依赖，
+# legacy 模式不会漏装它们，安全。
+if ! (cd "$out" && npm install --omit=dev --os=ios --cpu=arm64 --ignore-scripts --no-audit --no-fund --loglevel=error 2>&1 | tee /tmp/npm-install.log); then
+  echo "engine: strict install failed, retrying with --legacy-peer-deps..."
+  (cd "$out" && npm install --omit=dev --os=ios --cpu=arm64 --ignore-scripts --no-audit --no-fund --legacy-peer-deps --loglevel=error)
+fi
+
+# 装完必须能真的 import —— 上一版只查了语法和依赖存在，没查“装完能不能起”。
+smoke() {
+  (cd "$out" && node --input-type=module -e "
+    await import('@deepseek-ai/dsh-app-boot');
+    await import('meow-memory');
+  " 2>&1 | grep -v Warning)
+}
+if ! smoke; then
+  echo "engine: smoke import failed — aborting, see errors above" >&2
+  exit 1
+fi
 
 nm="$out/node_modules"
 before=$(du -sk "$nm" | cut -f1)
