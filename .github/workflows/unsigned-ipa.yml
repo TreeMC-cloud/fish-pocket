@@ -148,7 +148,7 @@ jobs:
           mkdir -p build/Payload build/ipa
           cp -R "$APP" build/Payload/
           cd build
-          zip -qry -0 ipa/DshIOS-unsigned.ipa Payload
+          zip -qry ipa/DshIOS-unsigned.ipa Payload
           cd ..
           ls -la build/ipa/
           unzip -l build/ipa/DshIOS-unsigned.ipa | head -15
