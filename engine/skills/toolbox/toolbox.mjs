@@ -53,7 +53,7 @@ if (!cmd || cmd === 'help') {
   toolbox.mjs stats                   看数据新鲜度
 
 搜索会同时匹配名字、简介、作者。多个关键词用空格分隔，全部命中才算。`);
-  process.exit(0);
+  process.exit(2);
 }
 
 if (cmd === 'cats') {
