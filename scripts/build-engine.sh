@@ -75,6 +75,16 @@ find "$nm" -type d \( -name test -o -name tests -o -name __tests__ -o -name docs
 { find "$nm" -type f -size +1k -print0 | xargs -0 file --mime-type 2>/dev/null | grep -E 'application/x-(mach-binary|executable|sharedlib)' || true; } | cut -d: -f1 | while read -r f; do rm -f "$f"; done
 # Bin links into what was pruned above: a dangling link in the bundle fails App Store validation.
 find "$nm" -type l ! -exec test -e {} \; -delete
+# TypeScript 源码：运行时只跑编译后的 .js，.ts 源码是给 IDE/编译用的。
+# zod 的 src/ 尤其严重：被嵌套复制 60+ 次（每个 dsh-* 包一份），共 7k+ 个文件。
+find "$nm" -type f -name '*.ts' -delete
+find "$nm" -type d -name src -path '*/node_modules/*' -exec rm -rf {} + 2>/dev/null || true
+# 浏览器 devtools（lighthouse worker 等）：iOS App 内没有浏览器 devtools 场景。
+rm -rf "$nm"/@deepseek-ai/dsh-experimental-inspector
+# 嵌套的重复 zod 副本：顶层已有一份，嵌套副本只是 npm 历史解析残留。
+# -mindepth 5 保证只删 @deepseek-ai/xxx/node_modules/zod 这种嵌套副本，
+# 顶层 node_modules/zod（深度 3）不受影响。
+find "$nm" -mindepth 5 -type d -name zod -path '*node_modules*' -exec rm -rf {} + 2>/dev/null || true
 after=$(du -sk "$nm" | cut -f1)
 echo "engine: $out ($((before/1024)) MB -> $((after/1024)) MB)"
 
