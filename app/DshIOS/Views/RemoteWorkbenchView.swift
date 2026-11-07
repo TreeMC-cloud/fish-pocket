@@ -41,6 +41,26 @@ struct RemoteWorkbenchPage: View {
             }
             .groupedRow()
 
+            // 成本提示：MCP 工具定义是每轮都注入的固定开销，不是白拿的。
+            // 用户不知道这件事，就会一直开着不用。
+            if active {
+                Section {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(Palette.waiting)
+                            .font(.caption)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("开启后每轮都会消耗约 1 千 token")
+                                .font(.callout)
+                            Text("远程工具的说明要在每轮对话里重新告诉模型。10 轮对话就是 1 万 token，即使一次都没调用。不用的时候建议断开。")
+                                .font(.caption)
+                                .foregroundStyle(Palette.secondary)
+                        }
+                    }
+                }
+                .groupedRow()
+            }
+
             Section {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("服务器地址").font(.caption).foregroundStyle(Palette.secondary)
