@@ -129,11 +129,26 @@ function readMemory(skipped, notes) {
   if (mem && proc) {
     const gap = Math.abs(proc.freeMB - mem.freeMB);
     if (gap > proc.totalMB * 0.1) {
+      // 两源差这么多，说明至少有一个是假的。实测（iSH）：
+      //   free -m  → 永远 4096/0/4096，静态桩
+      //   /proc    → 分配 500MB 后只变一次就冻结，也不准
+      // 两个都不可信时，唯一诚实的选择是「不拦，只警告」——
+      // 拿假数据判"内存不足"会误杀正常任务，比没有检查更糟。
+      const bothBroken = gap > proc.totalMB * 0.5;
       notes.push(
-        `free -m 报可用 ${mem.freeMB} MB，${SOURCES.meminfo} 报可用 ${proc.freeMB} MB，差 ${gap} MB / 总量 ${proc.totalMB} MB；` +
-        `差值过大说明 free 是静态桩，已改用 /proc/meminfo 作判据`,
+        `free -m 报可用 ${mem.freeMB} MB，${SOURCES.meminfo} 报可用 ${proc.freeMB} MB，` +
+        `差 ${gap} MB / 总量 ${proc.totalMB} MB —— ` +
+        (bothBroken
+          ? `两个来源互相矛盾且差距极大，判定本环境内存读数不可信；`
+          : `free 疑似静态桩，改用 /proc/meminfo；`),
       );
-      return { ...proc, source: SOURCES.meminfo, procFreeMB: proc.freeMB, procTotalMB: proc.totalMB };
+      return {
+        ...proc,
+        source: SOURCES.meminfo,
+        procFreeMB: proc.freeMB,
+        procTotalMB: proc.totalMB,
+        unreliable: bothBroken,
+      };
     }
     return { ...mem, source: 'free -m', procFreeMB: proc.freeMB, procTotalMB: proc.totalMB };
   }
@@ -282,6 +297,8 @@ function collect() {
       memPercent,
       memProcFreeMB: mem?.procFreeMB ?? null,
       memProcTotalMB: mem?.procTotalMB ?? null,
+      // 两个内存数据源互相矛盾时为 true，check 会降级成警告而不是拦截。
+      memUnreliable: mem?.unreliable === true,
       cpus: cpu.cpus,
       load1: cpu.load1,
       nodeProcs: procs.nodeProcs,
@@ -318,6 +335,15 @@ function judge(snap, threshold) {
   if (m.memPercent === null) {
     reasons.push({ level: 'warn', text: '可用内存读数不可用，无法判断内存红线' });
     level = 'warn';
+  } else if (m.memUnreliable && m.memPercent < freeStop) {
+    // 读数被判定不可信时降级为警告：宁可不拦，也别拿假数据误杀。
+    // 真机上 free 和 /proc 通常不会有这么大差距；一旦有，说明这个环境的
+    // 内存接口是桩实现，判"内存不足"等于瞎猜。
+    reasons.push({
+      level: 'warn',
+      text: `可用内存读数 ${m.memPercent}% 低于红线，但两个数据源互相矛盾（差值过大），本环境内存接口不可信；不拦截，请自行判断`,
+    });
+    level = level === 'stop' ? 'stop' : 'warn';
   } else if (m.memPercent < freeStop) {
     const why = m.memPercent < STOP_FREE_PERCENT
       ? `低于 15% 固定红线（已用 ${usedPercent}%）`
