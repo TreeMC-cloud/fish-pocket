@@ -10,7 +10,7 @@
   <b>No computer. No server. Not a web wrapper. The engine runs inside the app, and every screen is rebuilt in SwiftUI.</b>
 </p>
 
-<p align="center">Want an agent in your pocket too? <a href="https://testflight.apple.com/join/2SCftb2M"><b>Join the TestFlight beta</b></a>, and a ⭐ helps.</p>
+<p align="center">Want an agent in your pocket too? <a href="https://testflight.apple.com/join/2SCftb2M"><b>Join the TestFlight beta</b></a> (recommended, available worldwide) or <a href="https://apps.apple.com/app/id6830703602">get it on the App Store</a> (outside mainland China), and a ⭐ helps.</p>
 
 <p align="center"><a href="README.md">中文</a></p>
 
@@ -58,7 +58,10 @@ Model calls still need a network connection. Use a DeepSeek account or an API ke
 
 ## Quick start
 
-To install it, open the [TestFlight beta link](https://testflight.apple.com/join/2SCftb2M) on your iPhone or iPad. It needs iOS 17 or later.
+To install it, you need iOS 17 or later:
+
+- **TestFlight (recommended, available worldwide)**: open the [TestFlight beta link](https://testflight.apple.com/join/2SCftb2M) on your iPhone or iPad. New versions land here first and stay in step with this repository.
+- **App Store (outside mainland China)**: [download on the App Store](https://apps.apple.com/app/id6830703602). It is currently available outside mainland China only. Every App Store version has to wait for Apple's review, so it lags behind TestFlight and this repository.
 
 To build it yourself, you need macOS, Xcode 26, Node 24 and `xcodegen`, plus `cmake` or `uv` to build libgit2.
 
