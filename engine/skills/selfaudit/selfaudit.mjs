@@ -16,14 +16,28 @@
  * 用法：
  *   node selfaudit.mjs [工作目录]
  *   node selfaudit.mjs --json [工作目录]
+ *   node selfaudit.mjs --no-board [工作目录]   # 只看结果，不写待办
+ *   node selfaudit.mjs --json --no-board [工作目录]
  *
  * 退出码：0 全部通过；1 有问题；2 用法错误。
  *
  * 每条检查都遵守五步法：违规可判定 / 判据唯一 / 输出差异集合 /
  * 能证明会失败 / 有去向（失败项列出该做什么）。
+ *
+ * 但「打印到屏幕」这一步其实还没有去向：下次开工没人记得上次查出什么，
+ * 同样的坑会反复踩。所以失败项默认自动写进共享层的待办板，
+ * 变成下次一开工就能看见的「还欠着这几件事」。
+ * 待办只是提醒，写不进去不该让体检报错——体检的输出和退出码只由八类检查决定。
+ * --no-board 用于只想看结果、不想污染待办的场景。
+ *
+ * 八类检查统一调用 report() 收进 results，这就是可复用的结构化结果：
+ * 屏幕输出、退出码、进待办三件事都从同一份 results 推导，避免改坏原检查。
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 const KB = 1024;
 const results = [];
@@ -271,9 +285,160 @@ function checkFreshness(dir) {
   report('R8', '交接新鲜度', true, '（无交接文件）');
 }
 
+// ---------- 失败项 → 待办板 ----------
+/**
+ * 把一条失败结果翻成「能直接动手」的待办文字。
+ * 为什么不写「R1 失败」：那只是给机器看的编号，人看见编号还得回头查一遍
+ * 体检输出才知道要干嘛；闭环的意义就是下次开工不必再查。
+ * 所以每条都带具体动作 + 本次查到的差异集合（几个残留、哪两条偏好打架、
+ * 超了多少 KB），让待办单独拿出来就能执行。
+ * 判重的坑在 shared.mjs 这一侧：它是拿整段文字做等值比较的，所以只要
+ * 待办文字里混进每次都会变的东西（R8 的「31 天」、R7 的过期条数、
+ * readdir 的顺序、JSON 报错里的行列号），同一个坑第二天就会再加一行。
+ * 因此先把 detail 归一化成「稳定的问题特征」：数字抹平、文件名排序、
+ * 只保留冲突主体；文字和 key 都只由这份特征推导，两者一起稳定。
+ */
+function boardTodo(r) {
+  const d = (r.detail || '').trim();
+  let stamp = d;
+  if (r.id === 'R8') stamp = d.replace(/\d+\s*天/g, 'N 天').replace(/\d+/g, 'N');
+  if (r.id === 'R1' && d.includes('太虚')) stamp = '「下一步」太虚';
+  if (r.id === 'R2') stamp = d.replace(/^[\d.]+\s*KB/, 'N KB');
+  if (r.id === 'R7') stamp = d.replace(/^\d+ 条/, 'N 条').replace(/\d+\s*天/g, 'N 天');
+  if (r.id === 'R5' && d.includes('解析失败')) stamp = '.scene.json 解析失败';
+  if (r.id === 'R3') {
+    // 残留清单要进待办（人得知道删哪些），但顺序不能左右判重。
+    const m = d.match(/^(\d+)\s*个临时残留：(.*)$/);
+    stamp = m ? `${m[1]} 个临时残留：${m[2].split(/,\s*/).map((s) => s.trim()).filter(Boolean).sort().join(', ')}` : d;
+  }
+  // 稳定标记：同一类 + 同一现象 → 同一 hash；现象变了（比如残留从 3 个变 4 个）
+  // 才算一件新事，值得新开一行提醒。
+  const key = crypto.createHash('sha1').update(`${r.id}\n${stamp}`).digest('hex').slice(0, 8);
+  let action;
+  switch (r.id) {
+    case 'R1':
+      // 缺文件 / 缺小节 / 「下一步」太虚是三种不同的活，不能挤成一句「补交接」。
+      action = d.includes('没有找到')
+        ? '补一份 HANDOFF.md（上次交接/当前项目/变更记录/下一步卡点/关键文件五小节，「下一步」写成具体动作，不要「继续开发」）'
+        : d.includes('太虚')
+          ? '补 HANDOFF.md 的「下一步」（写成具体动作，不要「继续开发」这种空话）'
+          : `补齐 HANDOFF.md 缺的小节：${d.replace(/^缺小节：/, '')}`;
+      break;
+    case 'R2':
+      action = '把 HANDOFF.md 压回 4KB 以内：旧轮次搬进归档，只留最新一份 + 指针';
+      break;
+    case 'R3': {
+      // detail 形如「3 个临时残留：a.bak, b.tmp」，把清单原样带进待办，
+      // 免得下次还得重跑体检才知道要删哪些文件。
+      const list = stamp.split('：').slice(1).join('：').trim();
+      action = `清掉 ${list ? `${stamp.split('：')[0]}：${list}` : `临时残留（${d}）`}`;
+      break;
+    }
+    case 'R4':
+      action = `给超限技能拆文件：${d.replace(/^超 12KB：/, '')}；拆成「主文件 + reference 子文件」，主文件只留索引与判据`;
+      break;
+    case 'R5':
+      action = d.includes('解析失败')
+        ? '修好 .scene.json 的 JSON 语法'
+        : d.includes('没有 .scene.json')
+          ? '跑 scene.mjs init 建 .scene.json，写明这个场景负责什么、不碰什么'
+          : `补齐 .scene.json 的字段：${d.replace(/^缺字段：/, '')}（avoid 尤其不能空）`;
+      break;
+    case 'R6':
+      // 冲突明细里有类别和互相打架的两句话，直接写「删掉哪一条」。
+      action = d.includes('解析失败')
+        ? '修好 preferences.json 的 JSON 语法'
+        : `删掉冲突的偏好：${d.replace(/^\d+ 处可能冲突：/, '')}（跑 prefs.mjs list 看，删掉不要的那条）`;
+      break;
+    case 'R7':
+      action = d.includes('解析失败')
+        ? '修好共享层 board.json 的 JSON 语法'
+        : '清理挂了超过 14 天的待办：要么做掉要么删掉';
+      break;
+    case 'R8':
+      action = '更新或归档超过 7 天没动的交接文件：要么项目结束了删掉，要么把进度写进 HANDOFF.md';
+      break;
+    default:
+      action = `${r.name}：${d}`;
+  }
+  // 标记放末尾：人眼读的是前面的动作，机器判重靠的是这段不变的尾巴。
+  return { key, text: `${action} 〔体检${r.id}·${key}〕` };
+}
+
+/**
+ * 找到 shared.mjs 的绝对路径。
+ * 脚本和 shared.mjs 都在只读的 app bundle 里，工作目录里没有副本，
+ * 所以优先用 $DSH_TOOLS 拼；没设这个变量时退回「与本脚本同级的 ../shared」，
+ * 保证在开发机上直接跑也不会找不到工具。
+ */
+function sharedTool() {
+  const tools = process.env.DSH_TOOLS;
+  const candidates = tools
+    ? [path.join(tools, 'shared', 'shared.mjs')]
+    : [];
+  candidates.push(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'shared', 'shared.mjs'));
+  return candidates.find((p) => fs.existsSync(p)) || null;
+}
+
+/**
+ * 体检失败 → 写待办。
+ * 为什么整段包在 try/catch 里且从不改退出码：待办只是「下次开工的提醒」，
+ * 不是体检结论。目录不可写、shared.mjs 不在、JSON 坏了，都只该少一个提醒，
+ * 不该让本来能正常报出 3 个失败项的体检反而报错退出。
+ */
+function pushToBoard(failed) {
+  const out = { written: [], skipped: 0, reason: '' };
+  if (!failed.length) return out;
+
+  const tool = sharedTool();
+  if (!tool) { out.reason = '找不到 shared.mjs'; return out; }
+
+  for (const r of failed) {
+    const { key, text } = boardTodo(r);
+    try {
+      // 不经过 shell：node 在 iOS 上由 worker 线程代跑，路径和中文参数
+      // 交给 shell 解析容易被改写；spawnSync 直接传参数最稳，也拿得到 id。
+      // --go 必须带：shared.mjs 的写操作默认空跑（只打印「会加」不落盘），
+      // 体检要的是真闭环，得显式放行；该标志被它自己从 argv 里过滤掉，
+      // 不会混进待办文字。老版本没有空跑开关时会把它当未知参数忽略，兼容。
+      const res = spawnSync(process.execPath, [tool, 'board', 'add', text, '--go'], {
+        encoding: 'utf8',
+        timeout: 10000,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      const stdout = res.stdout || '';
+      const stderr = res.stderr || '';
+      // 判重分支要先认：shared.mjs 遇到同义条目时只打印「已经在待办里了」，
+      // 不会回显待办文字，所以不能拿标记去验这一路。
+      if (!res.error && res.status === 0 && stdout.includes('这条已经在待办里了')) {
+        out.skipped += 1;
+        continue;
+      }
+      // 校验「已加」+ 回显里的标记，而不是只看退出码：空跑、或将来
+      // shared.mjs 改了输出格式，都不能误报「已写进待办」。
+      if (res.error || res.status !== 0 || !stdout.includes('已加：') ||
+          !stdout.includes(`〔体检${r.id}·${key}〕`) || stdout.includes('空跑')) {
+        // 写不进去不能静默：说一句「待办没写成」即可，不影响体检输出与退出码。
+        out.reason = (stderr.trim() || (res.error && res.error.message) || 'board add 没返回成功').split('\n')[0];
+        continue;
+      }
+      const id = (stdout.match(/^\s*id:\s*(\S+)/m) || [])[1] || '';
+      // 拿到 id 才算真的新增——输出里要给人一个能 board done 划掉的把手。
+      if (id) out.written.push({ id, text });
+      else out.skipped += 1;
+    } catch (e) {
+      // 子进程崩了 / 超时也照常往下跑，理由最后统一提示一次。
+      out.reason = (e && e.message) || '待办写入异常';
+    }
+  }
+  return out;
+}
+
 // ---------- 入口 ----------
 const args = process.argv.slice(2);
 const asJson = args.includes('--json');
+// 默认自动进待办；只想看结果时用 --no-board 关掉，避免污染待办板。
+const noBoard = args.includes('--no-board');
 const dir = path.resolve(args.find((a) => !a.startsWith('--')) || '.');
 
 // 路径本身不合法是用法错误，不是"规矩没守住"——两者要分开报，
@@ -289,6 +454,55 @@ try {
 }
 
 checkHandoff(dir);
+// R9：地盘重叠检测 —— 两个场景的 territory 有包含关系就是冲突。
+// 他那边靠人工看，我们做成自动的。判据：A 是 B 的前缀或反过来。
+function checkTerritory(dir) {
+  const scenes = [];
+  // 找当前目录和兄弟目录里的 .scene.json（最多两层）
+  const roots = [dir, path.join(dir, '..')];
+  for (const root of roots) {
+    let entries = [];
+    try { entries = fs.readdirSync(root, { withFileTypes: true }); } catch { continue; }
+    for (const e of entries) {
+      if (!e.isDirectory()) continue;
+      const f = path.join(root, e.name, '.scene.json');
+      try {
+        const sc = JSON.parse(fs.readFileSync(f, 'utf8'));
+        if (sc.name && Array.isArray(sc.territory)) {
+          scenes.push({ name: sc.name, territory: sc.territory, at: f });
+        }
+      } catch {}
+    }
+  }
+  if (scenes.length < 2) {
+    report('R9', '地盘重叠', true, `（只有 ${scenes.length} 个场景，不足两个不检查）`);
+    return;
+  }
+  const conflicts = [];
+  for (let i = 0; i < scenes.length; i++) {
+    for (let j = i + 1; j < scenes.length; j++) {
+      const a = scenes[i], b = scenes[j];
+      for (const pa of a.territory) {
+        for (const pb of b.territory) {
+          // 一个路径是另一个的前缀 → 重叠（含相等）
+          const norm = (x) => x.replace(/\/+$/, '');
+          const na = norm(pa), nb = norm(pb);
+          if (na === nb || na.startsWith(nb + '/') || nb.startsWith(na + '/')) {
+            conflicts.push(`${a.name}(${pa}) 与 ${b.name}(${pb})`);
+          }
+        }
+      }
+    }
+  }
+  if (conflicts.length) {
+    report('R9', '地盘重叠', false,
+      `${conflicts.length} 处重叠：${conflicts.slice(0,3).join('；')}`,
+      '按 docs/场景地盘与仲裁.md 的仲裁表确认听谁的，或者把地盘收窄到不重叠');
+  } else {
+    report('R9', '地盘重叠', true, `${scenes.length} 个场景，无路径重叠`);
+  }
+}
+checkTerritory(dir);
 checkTempJunk(dir);
 checkSkills(dir);
 checkScene(dir);
@@ -299,7 +513,14 @@ checkFreshness(dir);
 const failed = results.filter((r) => !r.ok);
 const okCount = results.length - failed.length;
 
+// 先写待办再打印：待办是「体检的后续动作」，结论行必须留在最后说清楚
+// 这次到底欠了几件事、id 是什么。任何写入异常都被 pushToBoard 吞掉，
+// 不会改变下面原有的输出，也不会改变退出码。
+const board = noBoard ? { written: [], skipped: 0, reason: '', off: true } : pushToBoard(failed);
+
 if (asJson) {
+  // --json 的 stdout 必须仍是纯 JSON，否则调用方解析不了；待办照写不误，
+  // 需要看结果的场景用 --no-board 关闭写入。
   console.log(JSON.stringify({ ok: failed.length === 0, total: results.length, passed: okCount, results }, null, 2));
 } else {
   for (const r of results) {
@@ -312,6 +533,30 @@ if (asJson) {
     console.log('失败项已列出处理办法。没修的不要假装通过。');
   } else {
     console.log('规矩都在跑，不是口号。');
+  }
+
+  // 闭环的落点要放在最后：一眼看见通过/失败统计、这次新写进去的 id，
+  // 以及下次开工怎么把欠账调出来。
+  console.log('');
+  console.log(`${results.length} 类体检：${okCount} 通过，${failed.length} 失败`);
+  if (board.off) {
+    console.log('本次用了 --no-board，没有写进待办板。');
+  } else if (board.written.length) {
+    console.log(`已把 ${board.written.length} 条失败项写进待办板：`);
+    for (const w of board.written) {
+      console.log(`  ${w.id}  ${w.text}`);
+    }
+    console.log('下次开工跑 shared.mjs board 就能看到。');
+  } else if (board.skipped) {
+    // 旧待办即使问题已修好也留着：修好了 ≠ 我知道修好了，得人工 board done 划掉。
+    console.log(`这 ${board.skipped} 条失败项待办里已经有了，没有重复添加。`);
+    console.log('修好了记得用 shared.mjs board done <id> 划掉，跑 shared.mjs board 能看到。');
+  } else if (!failed.length) {
+    console.log('没有失败项，不需要进待办。');
+  }
+  if (board.reason) {
+    // 待办目录不可写等故障只提示，不改变体检结论和退出码。
+    console.log(`（待办没写成：${board.reason}；体检结果不受影响）`);
   }
 }
 process.exit(failed.length === 0 ? 0 : 1);
