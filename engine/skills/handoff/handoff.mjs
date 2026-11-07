@@ -61,11 +61,16 @@ const TEMPLATE = `# 交接
 `;
 
 function findFile(dir) {
-  const candidate = path.join(dir, 'HANDOFF.md');
-  if (fs.existsSync(candidate)) return candidate;
-  // 也接受小写
-  const lower = path.join(dir, 'handoff.md');
-  if (fs.existsSync(lower)) return lower;
+  for (const name of ['HANDOFF.md', 'handoff.md']) {
+    const candidate = path.join(dir, name);
+    try {
+      // isFile() 而不是 existsSync：同名目录存在时 existsSync 也返回 true，
+      // 后面 readFileSync 会抛 EISDIR 直接崩掉整个检查。
+      if (fs.statSync(candidate).isFile()) return candidate;
+    } catch {
+      // 不存在或读不到，继续试下一个
+    }
+  }
   return null;
 }
 
@@ -84,7 +89,19 @@ function check(dir) {
     };
   }
 
-  const text = fs.readFileSync(file, 'utf8');
+  let text;
+  try {
+    text = fs.readFileSync(file, 'utf8');
+  } catch (error) {
+    return {
+      ok: false,
+      file,
+      reason: '读不了这个文件',
+      detail: error.message,
+      problems: [`读取失败：${error.message}`],
+      notes: [],
+    };
+  }
   const bytes = Buffer.byteLength(text, 'utf8');
 
   // 1. 体量
