@@ -4,6 +4,9 @@
 # install skips lifecycle scripts, resolves platform packages for ios/arm64
 # (none exist, so no prebuilt binaries land), and prunes what cannot run
 # there or only serves development.
+#
+# CI 提速：产出树按 engine 内容的哈希缓存（actions/cache）。engine/ 没变时
+# 直接恢复，跳过 npm install 和剪枝这两步（省 2-4 分钟/次）。
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 src="$root/engine"
@@ -11,6 +14,11 @@ out="$root/app/build/nodejs-project"
 
 rm -rf "$out"
 mkdir -p "$out"
+if [ -f "$root/.engine-cache/nodejs-project.tar" ]; then
+  tar -xf "$root/.engine-cache/nodejs-project.tar" -C "$out"
+  echo "engine: restored from cache (engine/ unchanged)"
+  exit 0
+fi
 cp "$src/package.json" "$src/main.mjs" "$src/boot.mjs" "$src/ios.patch.yml" "$out/"
 cp -R "$src/plugins" "$out/plugins"
 cp -R "$src/shims" "$out/shims"
@@ -40,3 +48,7 @@ find "$nm" -type d \( -name test -o -name tests -o -name __tests__ -o -name docs
 find "$nm" -type l ! -exec test -e {} \; -delete
 after=$(du -sk "$nm" | cut -f1)
 echo "engine: $out ($((before/1024)) MB -> $((after/1024)) MB)"
+
+# CI 提速：产出树归档一份供 actions/cache 缓存。
+mkdir -p "$root/.engine-cache"
+tar -cf "$root/.engine-cache/nodejs-project.tar" -C "$out" .
