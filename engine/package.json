@@ -4,11 +4,22 @@
   "type": "module",
   "dependencies": {
     "@deepseek-ai/dsh": "0.2.2-rc.1",
-    "iconv-lite": "0.7.3",
     "just-bash": "3.6.0",
+    "meow-memory": "0.32.6",
     "node-addon-require-builtin-ios-arm64": "file:./shims/node-addon-require-builtin-ios-arm64",
     "pnpm": "11.28.5",
-    "yaml": "2.9.1"
+
+    "@deepseek-ai/dsh-llm": "0.0.1-rc.1",
+    "@deepseek-ai/schemastery": "3.19.0",
+    "@deepseek-ai/cordis": "4.1.0",
+    "@deepseek-ai/cosmokit": "1.9.0",
+    "@deepseek-ai/dsh-brand": "0.0.1-rc.1",
+    "@deepseek-ai/dsh-timeout": "0.0.1-rc.1",
+    "@deepseek-ai/dsh-attachment": "0.0.1-rc.1",
+    "@deepseek-ai/dsh-invariants": "0.0.1-rc.1",
+    "@deepseek-ai/cordis-plugin-loader": "1.1.0",
+    "@deepseek-ai/cordis-plugin-include": "1.1.0",
+    "@standard-schema/spec": "1.0.0"
   },
   "overrides": {
     "zod": "4.6.7"
