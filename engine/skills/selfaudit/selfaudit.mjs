@@ -145,6 +145,132 @@ function checkSkills(dir) {
   }
 }
 
+// ---------- R5 场景配置 ----------
+function checkScene(dir) {
+  const f = path.join(dir, '.scene.json');
+  if (!fs.existsSync(f)) {
+    // 没有场景配置不算错——大多数目录不需要。只在有 HANDOFF 却没场景时提示。
+    const hasHandoff = fs.existsSync(path.join(dir, 'HANDOFF.md'));
+    if (hasHandoff) {
+      report('R5', '场景配置', false,
+        '有交接文件但没有 .scene.json',
+        '跑 scene.mjs init 建一个，写明这个场景负责什么、不碰什么。否则 Agent 不知道自己是谁。');
+    } else {
+      report('R5', '场景配置', true, '（无需场景配置）');
+    }
+    return;
+  }
+  let scene;
+  try {
+    scene = JSON.parse(fs.readFileSync(f, 'utf8'));
+  } catch (e) {
+    report('R5', '场景配置', false, `.scene.json 解析失败：${e.message}`,
+      '修好 JSON 语法。');
+    return;
+  }
+  const missing = [];
+  if (!scene.name) missing.push('name');
+  if (!Array.isArray(scene.duty) || !scene.duty.length) missing.push('duty');
+  // avoid 是最重要的字段：说不清不碰什么，就说不清边界
+  if (!Array.isArray(scene.avoid) || !scene.avoid.length) missing.push('avoid');
+  if (missing.length) {
+    report('R5', '场景配置', false, `缺字段：${missing.join(', ')}`,
+      '尤其 avoid 不能空——说不清「不碰什么」就等于没有边界。');
+  } else {
+    report('R5', '场景配置', true, `${scene.name}（负责 ${scene.duty.length} 条，不碰 ${scene.avoid.length} 条）`);
+  }
+}
+
+// ---------- R6 偏好冲突 ----------
+function checkPrefs() {
+  const home = process.env.DSH_HOME;
+  const file = home ? path.join(home, 'preferences.json') : null;
+  if (!file || !fs.existsSync(file)) {
+    report('R6', '偏好', true, '（未设置偏好）');
+    return;
+  }
+  let prefs;
+  try {
+    prefs = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    report('R6', '偏好', false, 'preferences.json 解析失败', '修好 JSON。');
+    return;
+  }
+  // 检查同类里有没有明显矛盾的（简单启发：同一类里出现"不"字的相反说法）
+  const byKind = {};
+  for (const p of prefs) (byKind[p.kind] ||= []).push(p.text);
+  const conflicts = [];
+  for (const [k, texts] of Object.entries(byKind)) {
+    if (texts.length < 2) continue;
+    // 粗糙但有效的检查：一条说"用X"，一条说"不用X"
+    for (let i = 0; i < texts.length; i++) {
+      for (let j = i + 1; j < texts.length; j++) {
+        const a = texts[i], b = texts[j];
+        if (b.startsWith('不') && a.includes(b.slice(1))) conflicts.push(`${k}: 「${a}」vs「${b}」`);
+        if (a.startsWith('不') && b.includes(a.slice(1))) conflicts.push(`${k}: 「${a}」vs「${b}」`);
+      }
+    }
+  }
+  if (conflicts.length) {
+    report('R6', '偏好', false, `${conflicts.length} 处可能冲突：${conflicts.slice(0,3).join('；')}`,
+      '同一条偏好出现相反说法。跑 prefs.mjs list 看，删掉不要的那条。');
+  } else {
+    report('R6', '偏好', true, `${prefs.length} 条，无明显冲突`);
+  }
+}
+
+// ---------- R7 共享层卫生 ----------
+function checkShared() {
+  const home = process.env.DSH_HOME;
+  if (!home) { report('R7', '共享层', true, '（未启用）'); return; }
+  const boardFile = path.join(home, 'shared', 'board.json');
+  if (!fs.existsSync(boardFile)) {
+    report('R7', '共享层', true, '（还没有待办）');
+    return;
+  }
+  let board;
+  try { board = JSON.parse(fs.readFileSync(boardFile, 'utf8')); }
+  catch { report('R7', '共享层', false, '待办文件解析失败', '修好 JSON。'); return; }
+
+  const open = board.filter((x) => !x.done);
+  const now = Date.now();
+  // 超过 14 天没动的待办：要么做，要么删。长期挂着等于没有待办板。
+  const stale = open.filter((x) => {
+    const t = Date.parse((x.at || '').replace(' ', 'T'));
+    return Number.isFinite(t) && now - t > 14 * 86400_000;
+  });
+  if (stale.length) {
+    report('R7', '共享层', false,
+      `${stale.length} 条待办挂了超过 14 天：${stale.slice(0,3).map((x)=>x.text.slice(0,20)).join('、')}`,
+      '要么做掉，要么删掉。长期挂着的待办会让人不再看这块板。');
+  } else {
+    report('R7', '共享层', true, `${open.length} 条待办，无长期积压`);
+  }
+}
+
+// ---------- R8 交接新鲜度 ----------
+function checkFreshness(dir) {
+  for (const name of ['HANDOFF.md', 'handoff.md']) {
+    const f = path.join(dir, name);
+    if (!fs.existsSync(f)) continue;
+    const st = fs.statSync(f);
+    const days = (Date.now() - st.mtimeMs) / 86400_000;
+    if (days > 30) {
+      report('R8', '交接新鲜度', false,
+        `${name} 已经 ${days.toFixed(0)} 天没更新`,
+        '要么项目已经结束（删了或归档），要么交接没跟上实际进度——后者更危险。');
+    } else if (days > 7) {
+      report('R8', '交接新鲜度', false,
+        `${name} ${days.toFixed(0)} 天没更新`,
+        '如果还在做这个项目，交接该更新了。');
+    } else {
+      report('R8', '交接新鲜度', true, `${days < 1 ? '今天更新过' : days.toFixed(0) + ' 天前更新'}`);
+    }
+    return;
+  }
+  report('R8', '交接新鲜度', true, '（无交接文件）');
+}
+
 // ---------- 入口 ----------
 const args = process.argv.slice(2);
 const asJson = args.includes('--json');
@@ -165,6 +291,10 @@ try {
 checkHandoff(dir);
 checkTempJunk(dir);
 checkSkills(dir);
+checkScene(dir);
+checkPrefs();
+checkShared();
+checkFreshness(dir);
 
 const failed = results.filter((r) => !r.ok);
 const okCount = results.length - failed.length;
