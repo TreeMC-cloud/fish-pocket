@@ -197,15 +197,27 @@ const TOOLS = [
 // ---------- 调用工作台 ----------
 async function wb(method, path, body) {
   const url = `${WB_URL}${path}${path.includes('?') ? '&' : '?'}k=${encodeURIComponent(WB_KEY)}`;
-  const res = await fetch(url, {
-    method,
-    headers: {
-      'content-type': 'application/json',
-      ...(WB_KEY ? { authorization: `Bearer ${WB_KEY}` } : {}),
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-    signal: AbortSignal.timeout(120_000),
-  });
+  let res;
+  try {
+    res = await fetch(url, {
+      method,
+      headers: {
+        'content-type': 'application/json',
+        ...(WB_KEY ? { authorization: `Bearer ${WB_KEY}` } : {}),
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(120_000),
+    });
+  } catch (cause) {
+    // 网络层失败（DNS 错、拒绝连接、超时）。原始错误里带着内网 URL 和端口，
+    // 直接抛出去会把部署细节泄露给模型和用户，换成可行动的一句话。
+    const timedOut = cause?.name === 'TimeoutError' || cause?.name === 'AbortError';
+    const err = new Error(timedOut
+      ? '工作台响应超时（120 秒），任务可能仍在服务器上跑，稍后查状态'
+      : '连不上工作台，检查服务器地址、端口是否放行，以及服务是否在运行');
+    err.code = timedOut ? 504 : 502;
+    throw err;
+  }
   const text = await res.text();
   let data;
   try {
@@ -227,6 +239,17 @@ async function wb(method, path, body) {
 
 const PROTOCOL_VERSION = '2025-06-18';
 const SERVER_INFO = { name: 'sigma-workbench', version: '1.0.0' };
+
+/// 定长时间字符串比较。长度不同直接 false，否则逐字节异或累加，
+/// 耗时与是否提前匹配无关——避免通过响应时间猜口令。
+function timingSafeEqual(a, b) {
+  const ba = Buffer.from(String(a), 'utf8');
+  const bb = Buffer.from(String(b), 'utf8');
+  if (ba.length !== bb.length) return false;
+  let diff = 0;
+  for (let i = 0; i < ba.length; i += 1) diff |= ba[i] ^ bb[i];
+  return diff === 0;
+}
 
 function rpcResult(id, result) {
   return { jsonrpc: '2.0', id, result };
@@ -310,11 +333,12 @@ const server = createServer(async (req, res) => {
     return;
   }
 
-  // Bearer 鉴权：工作台配了口令就必须带对
+  // Bearer 鉴权：工作台配了口令就必须带对。
+  // 用定长时间比较而不是 ===，避免按字符逐个试探口令（服务可能暴露在公网）。
   if (WB_KEY) {
     const auth = req.headers.authorization || '';
     const token = auth.replace(/^Bearer\s+/i, '').trim();
-    if (token !== WB_KEY) {
+    if (!timingSafeEqual(token, WB_KEY)) {
       res.writeHead(401, { 'content-type': 'application/json' })
         .end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32001, message: '未授权：Bearer token 不正确' }, id: null }));
       return;
