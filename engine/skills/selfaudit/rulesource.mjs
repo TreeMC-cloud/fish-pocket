@@ -349,12 +349,22 @@ function scanFile(f) {
     // 第三条为什么必须有：AGENTS.md 那种整篇都是铁律的文件，
     // 要求每条都单独标来源等于逼人做 120 次机械劳动，最后一定没人做，
     // 检查就变成永远报错——而永远报错的检查最后一定被忽略。
+    // 文件级来源（文件头的「来源：」）不算真正有来源：
+    // 它说不出「这一条规矩是谁定的」。只用来把整篇标成「粗标」，
+    // 让人知道该文档至少声明过归属，但仍需逐条补精确标注。
     const tagged = hasSource(raw)
-      || (/^\s*[（(]/.test(next) && hasSource(next))
-      || (note !== null && note !== undefined);
-    report(f.rel, i + 1, gist(raw), tagged,
-      tagged ? '有来源标注' : '没有来源标注',
-      tagged ? '' : `跑 rulesource.mjs tag --file ${f.rel} --line ${i + 1} --from "用户 日期：「原话」" 补上`);
+      || (/^\s*[（(]/.test(next) && hasSource(next));
+    // 三档，不是两档：
+    //   精确（逐条标注）  —— 能说出这一条是谁定的
+    //   粗标（文件头声明）—— 只声明了整篇归属，说不出单条
+    //   无来源            —— 什么声明都没有
+    // 为什么分三档：把「粗标」也算成可疑，会让已有文档全红，
+    // 检查一旦全红就会被忽略；但把它算成合格，又等于放行不精确的规矩。
+    const precise = tagged;
+    const coarse = !precise && (note !== null && note !== undefined);
+    report(f.rel, i + 1, gist(raw), precise || coarse,
+      precise ? '有来源标注' : (coarse ? '粗标（仅文件头声明）' : '没有来源标注'),
+      precise ? '' : (coarse ? '建议补逐条标注' : '跑 rulesource.mjs tag 补上'));
   }
   return note;
 }
@@ -472,7 +482,7 @@ function printReport(filesScanned, notes) {
   out.push('规则来源审计');
   out.push('');
 
-  let total = 0, sourced = 0, filesWithRules = 0;
+  let total = 0, sourced = 0, preciseCount = 0, coarseCount = 0, filesWithRules = 0;
   for (const f of filesScanned) {
     const rs = byFile.get(f.rel) || [];
     if (!rs.length) continue;      // 没扫到规矩的文件不刷屏，只报有结论的
@@ -481,6 +491,9 @@ function printReport(filesScanned, notes) {
     const bad = rs.filter((r) => !r.ok);
     total += rs.length;
     sourced += good.length;
+    // 用 detail 字段区分，report() 里存的就是它
+    preciseCount += rs.filter((r) => r.detail === '有来源标注').length;
+    coarseCount += rs.filter((r) => r.detail && r.detail.indexOf('粗标') === 0).length;
     out.push(f.rel);
     if (bad.length === 0) {
       out.push(`  ✓ ${good.length} 条，全部有来源`);
@@ -496,7 +509,7 @@ function printReport(filesScanned, notes) {
   // 0 条时不能显示 100%——那读起来像"全都合规"，实际是"什么都没查"。
   const pct = total ? Math.round((sourced / total) * 100) : null;
   const suspicious = total - sourced;
-  out.push(`汇总：${total} 条规矩，${sourced} 条有来源（${pct === null ? '—' : pct + '%'}），${suspicious} 条可疑`);
+  out.push(`汇总：${total} 条规矩 —— 精确标注 ${preciseCount} 条，粗标 ${coarseCount} 条，无来源 ${suspicious} 条`);
   out.push(`判据：没有来源标注的新规矩 = 可疑。跑 rulesource.mjs tag 补上。`);
   out.push(`扫描：${filesScanned.length} 个文件存在并已扫，其中 ${filesWithRules} 个文件有规矩。`);
   // 文件头的总来源声明不当作合规，但要提醒人：它不等于逐条标注。
