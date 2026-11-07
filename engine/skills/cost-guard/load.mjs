@@ -108,11 +108,14 @@ function parseMeminfoMB(text) {
 }
 
 function readMemory(skipped, notes) {
-  // 优先级按项目约定：free -m 可用就用它，不可用才退 /proc/meminfo。
-  // 但 iSH 的 free 实测是静态桩（连续 3 次都是 4096/0/4096，与 /proc 的
-  // MemFree 差 3900MB 以上），所以两个都读得到时额外做一次交叉校验，
-  // 把差值原样写进 notes：读数存疑必须让人看见，不能悄悄"修正"数据，
-  // 否则哨兵给出的判断就没有可复核的依据。
+  // 两个来源都读，谁可信用谁。
+  //
+  // 为什么不固定优先 free -m：iSH 上它实测是静态桩 —— 连续 5 次都返回
+  // `4096 0 4096 0 0 0`，而同期 /proc/meminfo 的 MemFree 只有 379MB。
+  // 拿桩数据判断"内存充足"会让哨兵在最该拦的时候放行，比没有判据更危险。
+  //
+  // 判定规则：两源差值超过总量 10% 时，信 /proc（它是内核直接给的，不会说谎）；
+  // 差值正常则沿用 free -m（它给的是 MemAvailable，比 MemFree 更贴近"能用多少"）。
   let proc = null;
   try {
     proc = parseMeminfoMB(fs.readFileSync(SOURCES.meminfo, 'utf8'));
@@ -121,18 +124,21 @@ function readMemory(skipped, notes) {
   }
 
   const freeText = run('free', ['-m']);
-  let mem = freeText === null ? null : parseFreeMB(freeText);
-  if (mem) {
-    if (proc) {
-      const gap = Math.abs(proc.freeMB - mem.freeMB);
-      if (gap > proc.totalMB * 0.1) {
-        notes.push(
-          `free -m 报可用 ${mem.freeMB} MB，${SOURCES.meminfo} 报可用 ${proc.freeMB} MB，差 ${gap} MB / 总量 ${proc.totalMB} MB；` +
-          `按优先级采用 free -m，但该环境 free 疑似静态桩，内存结论可信度低`,
-        );
-      }
+  const mem = freeText === null ? null : parseFreeMB(freeText);
+
+  if (mem && proc) {
+    const gap = Math.abs(proc.freeMB - mem.freeMB);
+    if (gap > proc.totalMB * 0.1) {
+      notes.push(
+        `free -m 报可用 ${mem.freeMB} MB，${SOURCES.meminfo} 报可用 ${proc.freeMB} MB，差 ${gap} MB / 总量 ${proc.totalMB} MB；` +
+        `差值过大说明 free 是静态桩，已改用 /proc/meminfo 作判据`,
+      );
+      return { ...proc, source: SOURCES.meminfo, procFreeMB: proc.freeMB, procTotalMB: proc.totalMB };
     }
-    return { ...mem, source: 'free -m', procFreeMB: proc?.freeMB ?? null, procTotalMB: proc?.totalMB ?? null };
+    return { ...mem, source: 'free -m', procFreeMB: proc.freeMB, procTotalMB: proc.totalMB };
+  }
+  if (mem) {
+    return { ...mem, source: 'free -m', procFreeMB: null, procTotalMB: null };
   }
   if (proc) {
     return { ...proc, source: SOURCES.meminfo, procFreeMB: proc.freeMB, procTotalMB: proc.totalMB };
@@ -388,12 +394,13 @@ function judge(snap, threshold) {
     else if (r.level === 'warn' && level === 'ok') level = 'warn';
   }
 
-  // 降级到「内存 + CPU 判据都拿不到」时，不能返回 ok 假装检查过：
-  // 那正是「装饰性检查」。此时给 warn，并写清楚还缺哪块数据。
+  // 降级到「内存 + CPU 判据都拿不到」时，既不能返回 ok 假装检查过
+  // （那正是「装饰性检查」），也不能说「不足以放行」却给退出码 0。
+  // 没有可信证据就不派活：按 stop 处理，并写清楚还缺哪块数据。
   const judged = [m.memPercent !== null, m.load1 !== null && m.cpus > 0];
   if (judged.every((x) => !x)) {
-    level = level === 'stop' ? 'stop' : 'warn';
-    reasons.push({ level: 'warn', text: '内存与 CPU 两项主判据均不可用，本次结论不足以放行新任务' });
+    level = 'stop';
+    reasons.push({ level: 'stop', text: '内存与 CPU 两项主判据均不可用，没有可信证据，不放行新任务；先跑 show 看哪个数据源缺失' });
   }
 
   return {
@@ -417,7 +424,9 @@ const TITLE = {
 
 function advice(level, result) {
   if (level === 'stop') {
-    return '建议：等现有任务结束，或先砍掉并行数；iOS 上被系统杀进程不会有任何提示';
+    return result.reasons.some((r) => r.includes('主判据均不可用'))
+      ? '建议：先跑 node load.mjs show 定位缺失的数据源；恢复读数前不要派活，避免把「没测到」当成「没问题」'
+      : '建议：等现有任务结束，或先砍掉并行数；iOS 上被系统杀进程不会有任何提示';
   }
   if (level === 'warn') {
     return result.notes.length
@@ -448,7 +457,7 @@ function printShow(snap) {
   console.log(`采样时间        ${snap.at}`);
   line('内存总量', m.memTotalMB === null ? '不可用' : `${m.memTotalMB} MB`);
   line('可用内存', m.memFreeMB === null ? '不可用' : `${m.memFreeMB} MB / ${m.memTotalMB} MB（${m.memPercent}%）`);
-  if (m.memProcFreeMB !== null) {
+  if (m.memProcFreeMB !== null && snap.sources.mem !== SOURCES.meminfo) {
     line('/proc 对照', `MemFree/MemAvailable ${m.memProcFreeMB} MB / ${m.memProcTotalMB} MB，与 free -m 差 ${Math.abs(m.memProcFreeMB - m.memFreeMB)} MB`);
   }
   line('判据来源', snap.sources.mem);
