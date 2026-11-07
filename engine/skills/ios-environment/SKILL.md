@@ -1,6 +1,6 @@
 ---
 name: ios-environment
-description: This session runs inside an iOS app, not on a desktop, and many commands do not exist. Load this skill before relying on a shell command you are unsure of, whenever one fails or behaves unexpectedly, and before writing or changing a DSH plugin, because the app's native interface does not run a plugin's browser code.
+description: iOS 上没有真正的 Unix 系统，很多命令不存在。不确定某个 shell 命令能不能用、命令失败了、或者要写/改 DSH 插件之前，先读这个技能。
 ---
 
 # Working on iOS
