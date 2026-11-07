@@ -87,8 +87,9 @@ node "$DSH_TOOLS/dispatch-protocol/sentinel.mjs" open   # 我发出没回的
 | `attention-discipline` | 准备汇报/提问前 |
 | `agent-layers` | 设计流程、或发现"改了这里坏了那里" |
 | `selfaudit` | 定期体检，确认环境没退化 |
-| `remote-workbench` | 要用远程工作台能力时 |
+| `remote-workbench` | 用户说「连服务器」——在对话里问地址口令并配好，别让他去设置里翻 |
 | `workbench-discipline` | 多项目/多客户，需要防记忆污染 |
 | `cost-guard` | 派活前、做批量任务、发现轮次很多 |
 | `router` | 用户给笼统指令，要判断该谁做 |
+| `toolbox` | 要加新功能时，先去零件库查有没有现成的 |
 | `ios-environment` | 不确定某个 shell 命令能不能用 |
