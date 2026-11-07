@@ -1,0 +1,152 @@
+# 未签名 IPA：给已经越狱 / 自签重签的设备用，或供 AltStore、Sideloadly 这类
+# 工具注入自己的证书后安装。
+#
+# 为什么需要它：项目原有的 ios-build.yml 只编模拟器（CODE_SIGNING_ALLOWED=NO），
+# 交付不了能装到 iPhone 上的包。真机包必须用 iphoneos SDK 编，再手工组 IPA。
+#
+# 签名：Apple 的开发者证书只有持有账号的人才有，CI 里拿不到，所以这里产出的是
+# **未签名** .app 打包成的 .ipa。用 Sideloadly / AltStore / TrollStore 装的时候，
+# 这些工具会在本地用你自己的证书重签，不需要仓库里有任何密钥。
+name: Unsigned IPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      configuration:
+        description: 构建配置
+        required: false
+        default: Release
+        type: choice
+        options: [Release, Debug]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: unsigned-ipa-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    runs-on: macos-26
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: engine/package-lock.json
+
+      - name: Xcode
+        run: xcodebuild -version
+
+      # 与 ios-build.yml 同样的缓存键：vendored 依赖按生成脚本的哈希缓存。
+      - name: Cache nodejs-mobile
+        id: nodejs-mobile
+        uses: actions/cache@v5
+        with:
+          path: |
+            vendor/nodejs-mobile/ios
+            vendor/nodejs-mobile/rooted
+          key: nodejs-mobile-${{ hashFiles('scripts/fetch-nodejs-mobile.sh') }}
+
+      - name: Fetch nodejs-mobile
+        if: steps.nodejs-mobile.outputs.cache-hit != 'true'
+        run: scripts/fetch-nodejs-mobile.sh
+
+      - name: Check NodeMobile imports
+        run: scripts/check-root-imports.sh
+
+      - name: Cache libgit2
+        id: libgit2
+        uses: actions/cache@v5
+        with:
+          path: |
+            vendor/libgit2/Libgit2.xcframework
+            vendor/libgit2/ios-arm64
+            vendor/libgit2/ios-arm64-simulator
+            vendor/libgit2/macos
+          key: libgit2-${{ runner.os }}-${{ hashFiles('scripts/build-libgit2.sh') }}
+
+      - name: Build libgit2
+        if: steps.libgit2.outputs.cache-hit != 'true'
+        run: scripts/build-libgit2.sh
+
+      - name: Assemble engine
+        run: scripts/build-engine.sh
+
+      - name: Generate project
+        run: |
+          command -v xcodegen >/dev/null || brew install xcodegen
+          cd app && xcodegen generate --quiet
+
+      # 关键：-sdk iphoneos + 关闭签名。ARCHS=arm64 避开 x86_64 切片。
+      - name: Build (device, unsigned)
+        working-directory: app
+        run: |
+          set -o pipefail
+          xcodebuild -project DshIOS.xcodeproj -scheme DshIOS \
+            -configuration "${{ inputs.configuration }}" \
+            -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath build/DerivedData \
+            -skipPackagePluginValidation \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build 2>&1 | tail -60
+
+      # IPA = Payload/<App>.app 的 zip。未签名包里必须自带已签的
+      # NodeMobile 等 framework 才能被 dyld 加载，所以构建后逐个检查再重签一次
+      # （ad-hoc 签名，不需要证书）。
+      - name: Package IPA
+        working-directory: app
+        run: |
+          set -euo pipefail
+          APP="build/DerivedData/Build/Products/${{ inputs.configuration }}-iphoneos/DshIOS.app"
+          test -d "$APP" || { echo "missing $APP"; ls build/DerivedData/Build/Products/; exit 1; }
+          echo "--- bundle ---"
+          du -sh "$APP"
+          ls -la "$APP" | head -30
+
+          # 嵌进去的 framework 逐个 ad-hoc 重签：否则安装后 dyld 拒绝加载。
+          find "$APP/Frameworks" -name '*.framework' -maxdepth 1 -type d 2>/dev/null | while read -r fw; do
+            name=$(basename "$fw" .framework)
+            [ -f "$fw/$name" ] && codesign --force --sign - --timestamp=none "$fw/$name" || true
+            [ -d "$fw" ] && codesign --force --sign - --timestamp=none "$fw" || true
+          done
+          # Live Activity 扩展也要签。
+          for ext in "$APP"/PlugIns/*.appex; do
+            [ -d "$ext" ] || continue
+            codesign --force --sign - --timestamp=none --entitlements /dev/null "$ext" 2>/dev/null || \
+              codesign --force --sign - --timestamp=none "$ext" || true
+          done
+          codesign --force --sign - --timestamp=none "$APP" || echo "app ad-hoc sign skipped"
+
+          rm -rf build/Payload build/ipa
+          mkdir -p build/Payload build/ipa
+          cp -R "$APP" build/Payload/
+          cd build/Payload
+          zip -qry ../ipa/DshIOS-unsigned.ipa .
+          cd ../..
+          ls -la build/ipa/
+          unzip -l build/ipa/DshIOS-unsigned.ipa | head -15
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: DshIOS-unsigned-${{ inputs.configuration }}
+          path: app/build/ipa/DshIOS-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
+
+      # 让产物在手机上直接点开下载：artifact 需要登录，release 不需要。
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: |
+            app/build/DerivedData/Logs/Build/*.xcactivitylog
+          if-no-files-found: ignore
+          retention-days: 3
