@@ -188,9 +188,9 @@ struct ModelProvidersPage: View {
                 if app.settings.serves("agent-default-model") {
                     Section {
                         NavigationLink {
-                            NamespaceFormView(title: String(localized: "默认模型"), ns: "agent-default-model")
+                            DefaultModelPicker(defaultModel: $defaultModel)
                         } label: {
-                            LabeledContent("默认模型", value: defaultModel ?? "")
+                            LabeledContent("默认模型", value: defaultModel ?? String(localized: "未设置"))
                         }
                     }
                     .groupedRow()
@@ -1534,5 +1534,137 @@ private struct CustomProviderForm: View {
         onAdded()
         await model.load(app)
         app.showToast(String(localized: "已保存 \(displayName.isEmpty ? target : displayName)。"))
+    }
+}
+
+
+// MARK: - 默认模型选择页
+
+/// 设置 → 模型 → 默认模型：按提供商分组的模型列表，点一行即保存为新默认。
+/// 目录来自 `session/modelCatalog`（含第三方提供商），写入走 `agent-default-model`
+/// 命名空间 —— 与「添加第三方 API」保存后设默认用的是同一条通路。
+private struct DefaultModelPicker: View {
+    @Environment(AppModel.self) private var app
+    @Binding var defaultModel: String?
+
+    @State private var catalog: JSON?
+    @State private var failed = false
+    @State private var saving = false
+    @State private var conflict = false
+
+    private var currentRoute: (provider: String, model: String)? {
+        guard let catalog else { return nil }
+        guard let provider = catalog["default"]["provider"].string,
+              let model = catalog["default"]["model"].string else { return nil }
+        return (provider, model)
+    }
+
+    var body: some View {
+        List {
+            if failed {
+                Section {
+                    Text("无法加载模型目录。").font(.footnote).foregroundStyle(Palette.removed)
+                    Button("重试") { Task { await load() } }
+                }
+                .groupedRow()
+            } else if let catalog {
+                let groups = catalog["groups"].array.filter { !$0["models"].array.isEmpty }
+                if !catalog["failures"].array.isEmpty {
+                    Section {
+                        Text("部分模型提供商暂时无法加载。").font(.footnote).foregroundStyle(Palette.waiting)
+                    }
+                    .groupedRow()
+                }
+                if groups.isEmpty {
+                    Section {
+                        Text("当前没有可选的模型。先在「模型」页添加或配置一个提供商。")
+                            .font(.footnote).foregroundStyle(Palette.secondary)
+                    }
+                    .groupedRow()
+                }
+                ForEach(groups, id: \.self) { group in
+                    Section(group["name"].string ?? group["id"].string ?? "") {
+                        ForEach(group["models"].array, id: \.self) { model in
+                            row(
+                                provider: group["id"].string ?? "",
+                                modelID: model["id"].string ?? "",
+                                title: model["name"].string ?? model["id"].string ?? ""
+                            )
+                        }
+                    }
+                    .groupedRow()
+                }
+                if conflict {
+                    Section {
+                        Text("这些设置已在别处改动，请重试。").font(.footnote).foregroundStyle(Palette.removed)
+                    }
+                    .groupedRow()
+                }
+            } else {
+                Section { HStack { Spacer(); ProgressView(); Spacer() } }.groupedRow()
+            }
+        }
+        .groupedList()
+        .navigationTitle("默认模型")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await load() }
+        .refreshable { await load() }
+    }
+
+    @ViewBuilder
+    private func row(provider: String, modelID: String, title: String) -> some View {
+        let selected = currentRoute?.provider == provider && currentRoute?.model == modelID
+        Button {
+            guard !selected, !saving else { return }
+            Task { await save(provider: provider, model: modelID, title: title) }
+        } label: {
+            HStack {
+                Text(title).foregroundStyle(Palette.ink)
+                Spacer(minLength: 8)
+                if selected {
+                    Image(systemName: "checkmark").foregroundStyle(Palette.ink)
+                }
+            }
+        }
+        .disabled(selected || saving)
+    }
+
+    private func load() async {
+        failed = false
+        do {
+            catalog = try await app.client.call("session/modelCatalog")
+        } catch {
+            failed = true
+        }
+    }
+
+    private func save(provider: String, model: String, title: String) async {
+        guard app.settings.serves("agent-default-model") else { return }
+        saving = true
+        defer { saving = false }
+        var ops: [SettingsOp] = [
+            .set(["provider"], .string(provider)),
+            .set(["model"], .string(model)),
+        ]
+        // 换了提供商，原来的推理等级多半不适用：一并清掉，交给新适配器的默认值。
+        if let user = app.settings.namespace("agent-default-model")?["user"], !user.isNull,
+           user.value(at: ["reasoningEffort"]) != nil {
+            ops.append(.unset(["reasoningEffort"]))
+        }
+        do {
+            _ = try await app.settings.mutate(
+                "agent-default-model",
+                ops,
+                expectedRevision: app.settings.namespace("agent-default-model")?["revision"].int
+            )
+            conflict = false
+            defaultModel = title
+            Haptics.success()
+            app.showToast(String(localized: "默认模型已切换为 \(title)。"))
+        } catch {
+            Haptics.error()
+            conflict = isConflict(error)
+            app.showToast(describeFailure(error), duration: 5)
+        }
     }
 }
