@@ -32,7 +32,7 @@ BLOCKERS=0
 WARNINGS=0
 
 # ---- 1. 轮次：是不是该换了 ----
-echo "[1/3] 会话轮次"
+echo "[1/4] 会话轮次"
 TURNS_OUT=$(node "$TOOLS/cost-guard/turns.mjs" status 2>&1)
 TURNS_CODE=$?
 echo "$TURNS_OUT" | sed 's/^/      /'
@@ -48,7 +48,7 @@ esac
 echo
 
 # ---- 2. 交接：写好了吗 ----
-echo "[2/3] 交接文件"
+echo "[2/4] 交接文件"
 HANDOFF_OUT=$(node "$TOOLS/handoff/handoff.mjs" check "$DIR" 2>&1)
 HANDOFF_CODE=$?
 echo "$HANDOFF_OUT" | sed 's/^/      /'
@@ -58,7 +58,7 @@ fi
 echo
 
 # ---- 3. 台账：有没有人卡着 ----
-echo "[3/3] 派单台账"
+echo "[3/4] 派单台账"
 OPEN_OUT=$(node "$TOOLS/dispatch-protocol/sentinel.mjs" open 2>&1)
 OPEN_CODE=$?
 if [ $OPEN_CODE -eq 1 ]; then
@@ -74,6 +74,22 @@ if [ $AWAIT_CODE -eq 1 ]; then
   WARNINGS=$((WARNINGS + 1))
 fi
 echo
+
+# ---- 4. 归档旧交接 ----
+# 换会话前把当前交接存一份进归档层（只进不改）。
+# 为什么在这里做：这是"马上要换会话"的确定时刻，早归档没意义（还会重复），
+# 晚归档就丢了。
+if [ $HANDOFF_CODE -eq 0 ]; then
+  echo "[4/4] 归档旧交接"
+  ARCHIVE_OUT=$(node "$TOOLS/handoff/archive.mjs" put "$DIR/HANDOFF.md" --reason "换会话前自动归档" 2>&1)
+  if [ $? -eq 0 ]; then
+    echo "$ARCHIVE_OUT" | head -3 | sed 's/^/      /'
+  else
+    echo "      ! 归档失败（不影响换会话，但旧交接没存）"
+    echo "$ARCHIVE_OUT" | head -2 | sed 's/^/        /'
+  fi
+  echo
+fi
 
 # ---- 结论 ----
 echo "=== 结论 ==="
