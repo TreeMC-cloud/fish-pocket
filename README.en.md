@@ -92,9 +92,23 @@ iOS does not let apps create child processes or run downloaded binaries. Instead
   </picture>
 </p>
 
+## Plugin compatibility
+
+We took the 50 most-downloaded community DSH plugins as a sample and ran each one through install, enable, cold start and removal on the iOS engine. **This is only a sample, not a list of what's supported: other plugins can be installed too.**
+
+| Result | Plugins |
+|---|---:|
+| Work right away | 42 |
+| Work after allowing or skipping an install script, pinning a version, or restarting the app | 6 |
+| Not working yet | 2 |
+
+"Work" means the engine loads the plugin. We did not try each plugin's features. See [#18](https://github.com/imsai-sh/fish-pocket/issues/18) for per-plugin results.
+
 ## Roadmap
 
-- [ ] Better third-party plugin support
+- [x] Sample-test compatibility of popular community plugins
+- [ ] Define plugin compatibility tiers and an adaptation guide ([#4](https://github.com/imsai-sh/fish-pocket/issues/4))
+- [ ] Bundle a third-party plugin store ([#5](https://github.com/imsai-sh/fish-pocket/issues/5))
 - [ ] Move the bash interpreter off the engine thread
 
 ## Contributing
