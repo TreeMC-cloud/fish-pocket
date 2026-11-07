@@ -36,7 +36,7 @@ const TOOLS = [
   {
     name: 'wb_submit_task',
     description:
-      '提交一个开发需求给远程工作台。工作台会规划步骤、执行、验收，最终交付可用的成品（网页、脚本、文档等）。返回任务 id，之后用 wb_task_status 查进度。',
+      '提交开发需求给远程工作台，异步返回任务 id。用 wb_task_status 查结果。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -53,7 +53,7 @@ const TOOLS = [
   },
   {
     name: 'wb_list_tasks',
-    description: '列出工作台的任务（默认最近 20 条），可按状态过滤。状态：triage/todo/doing/review/done/blocked。',
+    description: '列出工作台任务，可按 state 过滤。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -82,7 +82,7 @@ const TOOLS = [
   },
   {
     name: 'wb_task_status',
-    description: '查单个任务的详细状态：阶段、门禁检查结果、产物路径、失败原因。提交任务后用这个跟踪进度。',
+    description: '查任务详情：阶段、门禁结果、产物路径。',
     inputSchema: {
       type: 'object',
       properties: { id: { type: 'string', description: '任务 id' } },
@@ -108,7 +108,7 @@ const TOOLS = [
   },
   {
     name: 'wb_move_task',
-    description: '把任务移到另一个看板状态。状态：triage/todo/doing/review/done/blocked。',
+    description: '移动任务看板状态。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -123,7 +123,7 @@ const TOOLS = [
   },
   {
     name: 'wb_memory_search',
-    description: '搜索工作台的长期记忆（跨项目积累的经验、结论、约定）。工作中遇到类似问题时先搜一下，避免重复踩坑。',
+    description: '搜索长期记忆。动手前先搜，避免重复踩坑。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -151,7 +151,7 @@ const TOOLS = [
   },
   {
     name: 'wb_memory_save',
-    description: '把一条经验/结论存进工作台的长期记忆，以后所有会话都能搜到。适合保存：踩过的坑、有效的做法、项目约定。',
+    description: '存一条经验结论到长期记忆。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -166,7 +166,7 @@ const TOOLS = [
   },
   {
     name: 'wb_list_skills',
-    description: '列出工作台沉淀的技能（已验证的做法模板）。做新需求前看一下有没有现成的。',
+    description: '列出已沉淀的技能模板。',
     inputSchema: { type: 'object', properties: {} },
     run: async () => {
       const data = await wb('GET', '/api/skills');
@@ -176,19 +176,19 @@ const TOOLS = [
   },
   {
     name: 'wb_stats',
-    description: '工作台整体状态：任务数、记忆条数、技能数、今日 token 与花费。开始工作前可以确认服务是否正常。',
+    description: '工作台状态：任务/记忆/技能数、今日消耗。',
     inputSchema: { type: 'object', properties: {} },
     run: async () => wb('GET', '/api/stats'),
   },
   {
     name: 'wb_health',
-    description: '探测远程工作台是否可达。连接配置好后先用这个确认。',
+    description: '探测工作台是否可达。',
     inputSchema: { type: 'object', properties: {} },
     run: async () => ({ ...(await wb('GET', '/api/health')), endpoint: WB_URL }),
   },
   {
     name: 'wb_evolve_advice',
-    description: '获取工作台的自进化建议：它自己分析出的改进方向和弱点。想了解这套系统当前短板时用。',
+    description: '工作台自评的改进方向与短板。',
     inputSchema: { type: 'object', properties: {} },
     run: async () => wb('GET', '/api/evolve/advice'),
   },
