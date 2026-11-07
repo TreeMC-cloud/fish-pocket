@@ -43,7 +43,12 @@ const FILES = {
   index: path.join(DIR, 'index.md'),
 };
 
+// 空跑开关：默认只打印计划，加 --go 才真执行。
+const GO = process.argv.includes('--go');
+
 function ensure() {
+  // 空跑时不建目录也不建文件：不然"只是看一眼"也会留下空台账。
+  if (!GO) return;
   fs.mkdirSync(DIR, { recursive: true });
   if (!fs.existsSync(FILES.board)) fs.writeFileSync(FILES.board, '[]', 'utf8');
 }
@@ -53,6 +58,8 @@ function readBoard() {
   try { return JSON.parse(fs.readFileSync(FILES.board, 'utf8')); } catch { return []; }
 }
 function writeBoard(list) {
+  // 空跑：待办/通知写错会误导下次开工，先看一眼再加 --go。
+  if (!GO) { console.log('   [空跑] 将写入 ' + list.length + ' 条'); return; }
   ensure();
   fs.writeFileSync(FILES.board, JSON.stringify(list, null, 2), 'utf8');
 }
@@ -60,7 +67,7 @@ function now() {
   return new Date().toISOString().replace('T', ' ').slice(0, 19);
 }
 
-const argv = process.argv.slice(2);
+const argv = process.argv.slice(2).filter(a => a !== '--go');
 const cmd = argv[0];
 
 if (!cmd || cmd === 'help') {
@@ -92,7 +99,7 @@ if (cmd === 'board') {
     const item = { id: `t${Date.now().toString(36)}`, text, at: now(), done: false };
     list.push(item);
     writeBoard(list);
-    console.log(`✓ 已加：${text}`);
+    console.log(GO ? `✓ 已加：${text}` : `（空跑）会加：${text}`);
     console.log(`  id: ${item.id}`);
     process.exit(0);
   }
@@ -106,7 +113,7 @@ if (cmd === 'board') {
     item.done = true;
     item.doneAt = now();
     writeBoard(list);
-    console.log(`✓ 已划掉：${item.text}`);
+    console.log(GO ? `✓ 已划掉：${item.text}` : `（空跑）会划掉：${item.text}`);
     process.exit(0);
   }
 
@@ -131,7 +138,7 @@ if (cmd === 'notice') {
   ensure();
   const line = JSON.stringify({ at: now(), text }) + '\n';
   fs.appendFileSync(FILES.notices, line, 'utf8');
-  console.log(`✓ 已记：${text}`);
+  console.log(GO ? `✓ 已记：${text}` : `（空跑）会记：${text}`);
   console.log('（通知只落盘，不唤醒任何人。要对方动手，用 dispatch-protocol 派单）');
   process.exit(0);
 }
