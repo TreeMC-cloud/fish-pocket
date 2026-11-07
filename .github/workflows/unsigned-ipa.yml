@@ -126,9 +126,9 @@ jobs:
           rm -rf build/Payload build/ipa
           mkdir -p build/Payload build/ipa
           cp -R "$APP" build/Payload/
-          cd build/Payload
-          zip -qry ../ipa/DshIOS-unsigned.ipa .
-          cd ../..
+          cd build
+          zip -qry ipa/DshIOS-unsigned.ipa Payload
+          cd ..
           ls -la build/ipa/
           unzip -l build/ipa/DshIOS-unsigned.ipa | head -15
 
