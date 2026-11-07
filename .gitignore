@@ -9,3 +9,12 @@ engine/.dsh-home-host/
 DerivedData/
 *.xcuserstate
 xcuserdata/
+
+# 场景 / 交接 / 偏好：运行时生成，属于用户数据，不进仓库
+.scene.json
+HANDOFF.md
+IDENTITY.md
+preferences.json
+.turns.jsonl
+.sentinel.jsonl
+.engine-cache/
