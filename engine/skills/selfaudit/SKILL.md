@@ -14,9 +14,11 @@ description: 定期跑一次规矩体检，确认工作环境没有悄悄退化�
 ## 怎么跑
 
 ```sh
-node skills/selfaudit/selfaudit.mjs <工作目录>
-node skills/selfaudit/selfaudit.mjs --json <工作目录>
+node "$DSH_TOOLS/selfaudit/selfaudit.mjs" <工作目录>
+node "$DSH_TOOLS/selfaudit/selfaudit.mjs" --json <工作目录>
 ```
+
+脚本在只读的 app bundle 里，不在你的工作目录下，所以必须用 `$DSH_TOOLS` 这个环境变量拼绝对路径。直接写 `node selfaudit.mjs` 会报找不到模块。
 
 退出码 0 = 全过，1 = 有问题（**这个非 0 很重要，它让检查真的会失败**）。
 
