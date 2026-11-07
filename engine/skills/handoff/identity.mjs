@@ -22,6 +22,7 @@ import path from 'node:path';
 import { execSync } from 'node:child_process';
 
 const dir = process.cwd();
+const writeMode = process.argv.includes("--write");
 const showOnly = process.argv.includes('--show');
 
 function safe(fn, fallback = null) {
@@ -158,8 +159,12 @@ lines.push('');
 
 const output = lines.join('\n');
 
-if (showOnly) {
+// 默认只打印，不写文件：这是身份卡，写错了会影响后续所有对话的自我认知。
+// 要落盘必须显式 --write，避免"顺手跑一下"就覆盖掉已有的身份。
+if (!writeMode) {
   process.stdout.write(output);
+  console.error('');
+  console.error('（以上只是预览。要写入 IDENTITY.md，加 --write）');
   process.exit(0);
 }
 
