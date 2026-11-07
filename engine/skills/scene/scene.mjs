@@ -25,6 +25,10 @@ import path from 'node:path';
 
 const MARK_START = '<!-- SCENE:BEGIN -->';
 const MARK_END = '<!-- SCENE:END -->';
+// 偏好段单独一对标记：它跨场景共用，和场景身份的生命周期不同——
+// 场景换了要重写场景段，但偏好不该跟着重写（那样会丢用户刚加的）。
+const PREF_START = '<!-- PREFS:BEGIN -->';
+const PREF_END = '<!-- PREFS:END -->';
 
 function fail(msg) {
   console.error(`错误：${msg}`);
@@ -84,6 +88,37 @@ function render(scene, dir) {
   lines.push('**开场先确认身份**：如果这是新会话，先读一遍 `HANDOFF.md` 看上次做到哪。');
   lines.push(MARK_END);
 
+  // 偏好：跨场景共用，从 preferences.json 读。
+  // 读不到就跳过（用户还没记过偏好是常态，不能因此报错）。
+  try {
+    const prefsFile = process.env.DSH_HOME
+      ? path.join(process.env.DSH_HOME, 'preferences.json')
+      : (process.env.DSH_IOS_DATA ? path.join(process.env.DSH_IOS_DATA, 'dsh', 'preferences.json') : null);
+    if (prefsFile && fs.existsSync(prefsFile)) {
+      const prefs = JSON.parse(fs.readFileSync(prefsFile, 'utf8'));
+      if (Array.isArray(prefs) && prefs.length) {
+        const LABELS = { interaction: '交互', tool: '工具', file: '文件',
+                         writing: '写作', safety: '安全', memory: '记忆' };
+        const byKind = {};
+        for (const p of prefs) (byKind[p.kind] ||= []).push(p.text);
+        const body = [];
+        for (const [k, label] of Object.entries(LABELS)) {
+          if (byKind[k]?.length) body.push(`- ${label}：${byKind[k].join('；')}`);
+        }
+        if (body.length) {
+          lines.push('');
+          lines.push(PREF_START);
+          lines.push('## 你的偏好');
+          lines.push('');
+          lines.push(...body);
+          lines.push(PREF_END);
+        }
+      }
+    }
+  } catch {
+    // 偏好文件坏了不该让场景注入失败——那是两件事。
+  }
+
   return lines.join('\n');
 }
 
@@ -95,17 +130,32 @@ function writeInto(file, block) {
     fs.mkdirSync(path.dirname(file), { recursive: true });
   }
 
-  // 已有场景段就替换，没有就追加。不做"先删后加"的粗暴操作：
-  // 用户可能在 SCENE 标记之外还写了别的东西。
-  const s = text.indexOf(MARK_START);
-  const e = text.indexOf(MARK_END);
-  if (s >= 0 && e > s) {
-    const cleaned = text.slice(0, s) + block + text.slice(e + MARK_END.length);
-    fs.writeFileSync(file, cleaned, 'utf8');
-  } else {
+  // 已有段就替换，没有就追加。不做"先删后加"的粗暴操作：
+  // 用户可能在标记之外还写了别的东西。
+  const replaceBlock = (src, start, end, newBlock) => {
+    const i = src.indexOf(start);
+    const j = src.indexOf(end);
+    if (i >= 0 && j > i) {
+      return src.slice(0, i) + newBlock + src.slice(j + end.length);
+    }
+    return null;
+  };
+
+  // 场景段和偏好段分开替换：偏好段在 block 里但标记不同，
+  // 一起替换会出问题（两次 sync 之间用户可能只改了偏好）。
+  const scenePart = block.includes(PREF_START) ? block.slice(0, block.indexOf(PREF_START)) : block;
+  const prefPart = block.includes(PREF_START) ? block.slice(block.indexOf(PREF_START)) : '';
+
+  let out = replaceBlock(text, MARK_START, MARK_END, scenePart.trimEnd());
+  if (out === null) {
     const sep = text && !text.endsWith('\n') ? '\n\n' : (text ? '\n' : '');
-    fs.writeFileSync(file, text + sep + block + '\n', 'utf8');
+    out = text + sep + scenePart.trimEnd() + '\n';
   }
+  if (prefPart) {
+    const withPref = replaceBlock(out, PREF_START, PREF_END, prefPart.trimEnd());
+    out = withPref === null ? out.trimEnd() + '\n\n' + prefPart.trimEnd() + '\n' : withPref;
+  }
+  fs.writeFileSync(file, out, 'utf8');
 }
 
 const argv = process.argv.slice(2);
