@@ -67,6 +67,14 @@ function render(scene, dir) {
   lines.push(`你在 **${scene.name || path.basename(dir)}** 这个场景里。`);
   lines.push('');
 
+  // 地盘：具体到路径，说清"我拥有哪些目录"。
+  // 缺这一层的后果：和别人抢同一个文件，或者该改的不敢改。
+  if (Array.isArray(scene.territory) && scene.territory.length) {
+    lines.push('**你拥有这些路径：**');
+    for (const t of scene.territory) lines.push(`- \`${t}\``);
+    lines.push('');
+  }
+
   if (Array.isArray(scene.duty) && scene.duty.length) {
     lines.push('**你负责：**');
     for (const d of scene.duty) lines.push(`- ${d}`);
@@ -186,6 +194,7 @@ if (cmd === 'init') {
   const template = {
     name: path.basename(dir),
     duty: ['（这个场景负责什么？写可执行的动作，不要写"管理"这种空话）'],
+    territory: ['（你拥有哪些路径？写到目录级，例如 src/ 、docs/）'],
     avoid: ['（明确不碰什么？这条最重要，边界靠它）'],
     skill: '',
   };
@@ -247,6 +256,7 @@ if (cmd === 'sync') {
   console.log(`  场景：${scene.name}`);
   console.log(`  负责：${(scene.duty || []).length} 条`);
   console.log(`  不碰：${(scene.avoid || []).length} 条`);
+  if (scene.territory) console.log(`  地盘：${scene.territory.length} 条路径`);
   console.log('');
   console.log('下次会话开始时，这段会自动出现在 Agent 每轮读到的内容里。');
   process.exit(0);
