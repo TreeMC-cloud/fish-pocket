@@ -41,13 +41,21 @@ if ! (cd "$out" && npm install --omit=dev --os=ios --cpu=arm64 --ignore-scripts 
   (cd "$out" && npm install --omit=dev --os=ios --cpu=arm64 --ignore-scripts --no-audit --no-fund --legacy-peer-deps --loglevel=error)
 fi
 
-# 装完必须能真的 import —— 上一版只查了语法和依赖存在，没查“装完能不能起”。
-# 注意：node 的输出必须重定向到文件再用退出码判定，不能接 grep 管道 ——
-# 成功时 node 只打 ExperimentalWarning，被 grep 滤光后 grep 自己退出码 1，冒烟就误报失败。
-(cd "$out" && node --input-type=module -e "
-  await import('@deepseek-ai/dsh-app-boot');
-  await import('meow-memory');
-" > /tmp/engine-smoke.log 2>&1) || { echo "engine: smoke import failed:" >&2; grep -v 'Warning' /tmp/engine-smoke.log >&2 || cat /tmp/engine-smoke.log >&2; exit 1; }
+# npm 把 file: 依赖装成符号链接（node_modules/@deepseek-ai/dsh-llm → ../../shims/...）。
+# 构建机上链接有效，但 Xcode 打进 .app 时不保留符号链接 —— 链接整个丢失，
+# 真机就报 ERR_MODULE_NOT_FOUND（上一版真机起不来的另一半原因）。
+# 所以装完立刻物化成真实目录，不依赖链接。
+for dep in dsh-llm node-addon-require-builtin-ios-arm64; do
+  d="$out/node_modules/@deepseek-ai/$dep"
+  [ "$dep" = node-addon-require-builtin-ios-arm64 ] && d="$out/node_modules/$dep"
+  if [ -L "$d" ]; then
+    tgt=$(readlink "$d")
+    rm "$d"
+    case "$tgt" in /*) src_shim="$tgt";; *) src_shim="$(cd "$(dirname "$d")" && cd "$tgt" && pwd)";; esac
+    cp -R "$src_shim" "$d"
+    echo "engine: materialized symlink $dep -> real copy"
+  fi
+done
 
 nm="$out/node_modules"
 before=$(du -sk "$nm" | cut -f1)
@@ -69,6 +77,21 @@ find "$nm" -type d \( -name test -o -name tests -o -name __tests__ -o -name docs
 find "$nm" -type l ! -exec test -e {} \; -delete
 after=$(du -sk "$nm" | cut -f1)
 echo "engine: $out ($((before/1024)) MB -> $((after/1024)) MB)"
+
+# ---- 体积裁剪：确认零引用的大包（2026-11-08 实测静态/动态 import + require 均 0 处）----
+# pnpm: 只被 `dsh plugin add` CLI 转发使用（App 内无此场景）；npm null/matches 崩溃嫌疑。
+# sql.js/typescript/openai/@anthropic-ai/@google/@smithy: DSH 全树零引用的传递依赖。
+rm -rf "$nm"/sql.js "$nm"/typescript "$nm"/pnpm "$nm"/openai "$nm"/@anthropic-ai \
+       "$nm"/@google "$nm"/@smithy
+# 剪枝后冒烟必须放在这里：验证的是“最终形态”（物化目录 + 无链接 + 已裁剪），
+# CI 验证过的树 ≠ 打进 .app 的树，真机跑的是后者。
+(cd "$out" && node --input-type=module -e "
+  await import('@deepseek-ai/dsh-app-boot');
+  await import('meow-memory');
+" > /tmp/engine-smoke.log 2>&1) || { echo "engine: smoke import failed:" >&2; grep -v 'Warning' /tmp/engine-smoke.log >&2 || cat /tmp/engine-smoke.log >&2; exit 1; }
+echo "engine: post-prune smoke OK"
+after2=$(du -sk "$nm" | cut -f1)
+echo "engine: final $((after2/1024)) MB (pruned $(( (after-after2)/1024 )) MB)"
 
 # CI 提速：产出树归档一份供 actions/cache 缓存。
 mkdir -p "$root/.engine-cache"
