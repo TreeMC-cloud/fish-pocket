@@ -42,16 +42,12 @@ if ! (cd "$out" && npm install --omit=dev --os=ios --cpu=arm64 --ignore-scripts 
 fi
 
 # 装完必须能真的 import —— 上一版只查了语法和依赖存在，没查“装完能不能起”。
-smoke() {
-  (cd "$out" && node --input-type=module -e "
-    await import('@deepseek-ai/dsh-app-boot');
-    await import('meow-memory');
-  " 2>&1 | grep -v Warning)
-}
-if ! smoke; then
-  echo "engine: smoke import failed — aborting, see errors above" >&2
-  exit 1
-fi
+# 注意：node 的输出必须重定向到文件再用退出码判定，不能接 grep 管道 ——
+# 成功时 node 只打 ExperimentalWarning，被 grep 滤光后 grep 自己退出码 1，冒烟就误报失败。
+(cd "$out" && node --input-type=module -e "
+  await import('@deepseek-ai/dsh-app-boot');
+  await import('meow-memory');
+" > /tmp/engine-smoke.log 2>&1) || { echo "engine: smoke import failed:" >&2; grep -v 'Warning' /tmp/engine-smoke.log >&2 || cat /tmp/engine-smoke.log >&2; exit 1; }
 
 nm="$out/node_modules"
 before=$(du -sk "$nm" | cut -f1)
