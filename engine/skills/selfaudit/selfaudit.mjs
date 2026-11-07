@@ -150,6 +150,18 @@ const args = process.argv.slice(2);
 const asJson = args.includes('--json');
 const dir = path.resolve(args.find((a) => !a.startsWith('--')) || '.');
 
+// 路径本身不合法是用法错误，不是"规矩没守住"——两者要分开报，
+// 否则用户看到一堆 ✗ 却不知道是自己路径写错了。
+try {
+  if (!fs.statSync(dir).isDirectory()) {
+    console.error(`不是目录：${dir}`);
+    process.exit(2);
+  }
+} catch {
+  console.error(`路径不存在：${dir}`);
+  process.exit(2);
+}
+
 checkHandoff(dir);
 checkTempJunk(dir);
 checkSkills(dir);
