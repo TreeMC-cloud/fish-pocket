@@ -103,6 +103,9 @@ rm -rf "$nm"/sql.js "$nm"/typescript "$nm"/pnpm "$nm"/openai "$nm"/@anthropic-ai
   if (typeof llm.HarnessError !== 'function') throw new Error('dsh-llm shim missing HarnessError');
   await import('@deepseek-ai/dsh-app-boot');
   await import('@deepseek-ai/dsh-web');
+  await import('@deepseek-ai/dsh-tools');   // peer: dsh-scope 等
+  await import('@deepseek-ai/dsh-session-persistence');
+  await import('@deepseek-ai/dsh-spill-local');
   await import('meow-memory');
 " > /tmp/engine-smoke.log 2>&1) || { echo "engine: smoke import failed:" >&2; grep -v 'Warning' /tmp/engine-smoke.log >&2 || cat /tmp/engine-smoke.log >&2; exit 1; }
 echo "engine: post-prune smoke OK"
