@@ -47,6 +47,10 @@ const env = {
   DSH_IOS_DOCUMENTS: process.env.DSH_IOS_DOCUMENTS ?? path.join(data, 'documents'),
   // Skills that ship with the app, ios-environment among them (dsh-skill-filesystem's bundled root).
   DSH_BUNDLED_SKILL_DIR: path.join(path.dirname(fileURLToPath(import.meta.url)), 'skills'),
+  // 技能里的自查脚本（selfcheck / handoff / selfaudit / verify）住在只读的 app bundle 里，
+  // 而 Agent 的工作目录是可写的 workspace —— 技能文档里写相对路径必然找不到。
+  // 把这个绝对前缀给出去，文档里就能写 $DSH_TOOLS/xxx.mjs。
+  DSH_TOOLS: path.join(path.dirname(fileURLToPath(import.meta.url)), 'skills'),
   SHELL: process.env.SHELL ?? '/bin/bash',
   // Commands resolve inside the in-process shell, whose binaries live in /bin;
   // the OS PATH (simulator runtime dirs, /usr/bin on device) means nothing there.
