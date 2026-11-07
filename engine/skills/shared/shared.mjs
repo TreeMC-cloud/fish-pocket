@@ -81,7 +81,7 @@ if (!cmd || cmd === 'help') {
   shared.mjs index              看总索引
 
 数据目录：${DIR}`);
-  process.exit(0);
+  process.exit(2);
 }
 
 if (cmd === 'board') {
@@ -135,10 +135,18 @@ if (cmd === 'board') {
 if (cmd === 'notice') {
   const text = argv.slice(1).join(' ').trim();
   if (!text) { console.error('错误：要写通知内容'); process.exit(2); }
+  // 空跑时 ensure() 自己会 return，但后面的 appendFileSync 还是会写 ──
+  // 所以这里必须显式挡住，不能只靠 ensure()。
+  if (!GO) {
+    console.log(`（空跑）会记：${text}`);
+    console.log('   [空跑] 没有写入任何文件。加 --go 才会真执行。');
+    console.log('（通知只落盘，不唤醒任何人。要对方动手，用 dispatch-protocol 派单）');
+    process.exit(0);
+  }
   ensure();
   const line = JSON.stringify({ at: now(), text }) + '\n';
   fs.appendFileSync(FILES.notices, line, 'utf8');
-  console.log(GO ? `✓ 已记：${text}` : `（空跑）会记：${text}`);
+  console.log(`✓ 已记：${text}`);
   console.log('（通知只落盘，不唤醒任何人。要对方动手，用 dispatch-protocol 派单）');
   process.exit(0);
 }
