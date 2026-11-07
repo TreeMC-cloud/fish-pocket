@@ -510,6 +510,56 @@ function checkTerritory(dir) {
   }
 }
 checkTerritory(dir);
+// R10：文档状态 —— docs/ 下的文档必须标状态，否则会越堆越多没人知道该信哪个。
+// 判据：每个 .md 开头 10 行内要有「状态：活/常备/留档/待清」之一。
+// 状态格必须精确等于四个词之一，写「留档（2026-10-18 归档）」会被解析器当"未登记"。
+function checkDocStatus(dir) {
+  const docsDir = path.join(dir, 'docs');
+  if (!fs.existsSync(docsDir)) {
+    report('R10', '文档状态', true, '（无 docs 目录，跳过）');
+    return;
+  }
+  const STATES = ['活', '常备', '留档', '待清'];
+  const files = [];
+  // 只检查**我们自己写的**文档，不检查上游带来的。
+  // 上游文档（docs/design、docs/promo、docs/webui）是别人维护的，
+  // 我们改不了也不该改；把它们算进检查会让这个检查永远报错，
+  // 而永远报错的检查最后一定被忽略。
+  const SKIP = new Set(['design', 'promo', 'webui', 'assets']);
+  function walk(d) {
+    let es = [];
+    try { es = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+    for (const e of es) {
+      const full = path.join(d, e.name);
+      if (e.isDirectory()) {
+        if (SKIP.has(e.name)) continue;
+        walk(full);
+      } else if (e.name.endsWith('.md')) files.push(full);
+    }
+  }
+  walk(docsDir);
+  if (!files.length) {
+    report('R10', '文档状态', true, '（docs 里没有 md）');
+    return;
+  }
+  const missing = [];
+  for (const f of files) {
+    let head = '';
+    try { head = fs.readFileSync(f, 'utf8').slice(0, 600); } catch { continue; }
+    const m = head.match(/状态[：:]\s*(\S+)/);
+    if (!m || !STATES.includes(m[1])) {
+      missing.push(path.relative(dir, f) + (m ? `（写了「${m[1]}」，不是四词之一）` : ''));
+    }
+  }
+  if (missing.length) {
+    report('R10', '文档状态', false,
+      `${missing.length}/${files.length} 份没标状态或状态不合法`,
+      `在文档开头加「状态：活」（可选值：${STATES.join(' / ')}）；明细：${missing.slice(0,3).join('、')}`);
+  } else {
+    report('R10', '文档状态', true, `${files.length} 份全部有合法状态`);
+  }
+}
+checkDocStatus(dir);
 checkTempJunk(dir);
 checkSkills(dir);
 checkScene(dir);
