@@ -274,6 +274,19 @@ function checkFile(file) {
     return;
   }
   const ext = path.extname(file);
+
+  // JSON 单独处理：它是最容易被写坏的格式（多一个逗号、少一个引号），
+  // 而 JSON.parse 是最权威的判据 —— 比任何括号平衡检查都准。
+  // 之前漏了这条，坏 JSON 会显示「自查通过」，误报比不检查更危险。
+  if (ext === '.json') {
+    try {
+      JSON.parse(text);
+    } catch (e) {
+      add('error', file, 0, 'I7', `JSON 解析失败：${e.message}`);
+    }
+    return;
+  }
+
   if (!SRC_EXT.has(ext)) return;
   checkContent(file, text);
   checkBalance(file, text);
