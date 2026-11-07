@@ -311,6 +311,9 @@ function boardTodo(r) {
     const m = d.match(/^(\d+)\s*个临时残留：(.*)$/);
     stamp = m ? `${m[1]} 个临时残留：${m[2].split(/,\s*/).map((s) => s.trim()).filter(Boolean).sort().join(', ')}` : d;
   }
+  // R9 是并行的另一项改动加进来的检查，失败项同样要能进待办；
+  // 重叠处数抹平，避免场景增减让同一个冲突反复开新条目。
+  if (r.id === 'R9') stamp = d.replace(/^\d+ 处/, 'N 处');
   // 稳定标记：同一类 + 同一现象 → 同一 hash；现象变了（比如残留从 3 个变 4 个）
   // 才算一件新事，值得新开一行提醒。
   const key = crypto.createHash('sha1').update(`${r.id}\n${stamp}`).digest('hex').slice(0, 8);
@@ -357,6 +360,10 @@ function boardTodo(r) {
       break;
     case 'R8':
       action = '更新或归档超过 7 天没动的交接文件：要么项目结束了删掉，要么把进度写进 HANDOFF.md';
+      break;
+    case 'R9':
+      // 地盘重叠是 R9 检查的失败项：写清楚按仲裁表定归属，或把路径收窄。
+      action = `处理重叠的场景地盘：${d.replace(/^\d+ 处重叠：/, '').replace(/^N 处重叠：/, '')}；按仲裁表确认听谁的，或把 territory 收窄到不重叠`;
       break;
     default:
       action = `${r.name}：${d}`;
@@ -535,8 +542,9 @@ if (asJson) {
     console.log('规矩都在跑，不是口号。');
   }
 
-  // 闭环的落点要放在最后：一眼看见通过/失败统计、这次新写进去的 id，
-  // 以及下次开工怎么把欠账调出来。
+// 闭环的落点要放在最后：一眼看见通过/失败统计、这次新写进去的 id，
+  // 以及下次开工怎么把欠账调出来。用 results.length 而不是写死 8：
+  // 并行的 R9 等新检查加进来时，统计行不会说谎。
   console.log('');
   console.log(`${results.length} 类体检：${okCount} 通过，${failed.length} 失败`);
   if (board.off) {
