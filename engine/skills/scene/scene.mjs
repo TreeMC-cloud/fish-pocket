@@ -180,7 +180,7 @@ if (!cmd || cmd === 'help') {
   scene.mjs sync   [目录]     把场景身份写进 AGENTS.md
   scene.mjs show   [目录]     看当前场景
   scene.mjs list              列出所有场景`);
-  process.exit(0);
+  process.exit(2);
 }
 
 const dir = path.resolve(argv[1] && !argv[1].startsWith('-') ? argv[1] : process.cwd());
