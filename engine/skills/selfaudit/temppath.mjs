@@ -43,12 +43,30 @@ const 嫌疑规则 = [
     原因: () => `后缀 ${ext}`,
   })),
   { 命中: (n) => n.endsWith('~'), 原因: () => '~ 结尾' },
-  // 关键词刻意用最朴素的「包含」判断：这正是盲区的来源，不做聪明修正，
-  // 免得使用者以为它能看懂语义。
-  ...['副本', '备份', '临时', 'test', 'debug'].map((词) => ({
-    命中: (n) => n.toLowerCase().includes(词.toLowerCase()),
+  // 中文关键词：这些词出现在文件名里基本就是临时文件。
+  ...['副本', '备份', '临时'].map((词) => ({
+    命中: (n) => n.includes(词),
     原因: () => `名字含「${词}」`,
   })),
+  // test / debug：只在**不像正式代码**时才算。
+  // 正式代码叫 debug-inbox.mjs、test-root-sim.sh 的太多了，
+  // 光凭这两个词判会把项目自己的测试和工具全报成垃圾（实测 14 条全误报）。
+  // 判据：含 test/debug **且** 带临时后缀或明显的临时命名。
+  {
+    命中: (n) => {
+      const low = n.toLowerCase();
+      if (!low.includes('test') && !low.includes('debug')) return false;
+      // 带临时后缀 → 是
+      if (/\.(bak|tmp|orig|log|zip)$/.test(low) || low.endsWith('~')) return true;
+      // 带 .test.mjs / .spec.js 这类 → 是正式测试，不是
+      if (/\.(test|spec)\.[a-z]+$/.test(low)) return false;
+      // Test / TEST 开头且全大写 → 像人工命名的临时目录
+      if (/^(test|debug)[-_]?\d*$/i.test(n.replace(/\.[^.]+$/, ''))) return true;
+      // 其余（debug-inbox.mjs、test-root-sim.sh）→ 当正式代码，不报
+      return false;
+    },
+    原因: () => '名字含 test/debug 且像临时文件',
+  },
 ];
 
 // 返回第一个命中原因，没命中返回 null。只报文件、不报目录名：
@@ -376,7 +394,10 @@ function 出检查(路径参数) {
 
 // 只报文件不报目录；跳过版本库和依赖目录，避免扫出成百上千条无关条目，
 // 把真正的违规淹掉（输出要说「差异集合」，不是倒一车垃圾）。
-const 跳过目录 = new Set(['.git', 'node_modules', '.svn', '.hg']);
+// 跳过目录：这些整棵不扫。
+// test/ 和 tests/ 必须跳过——单元测试文件天然叫 *.test.mjs，
+// 按「名字含 test」判会全被当成临时文件（实测本项目 12 个测试文件全中招）。
+const 跳过目录 = new Set(['.git', 'node_modules', '.svn', '.hg', 'test', 'tests', '__tests__']);
 
 function 收集违规(根, 大, 剪枝集合) {
   const 结果 = [];
