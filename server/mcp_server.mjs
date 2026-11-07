@@ -40,9 +40,9 @@ const TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        title: { type: 'string', description: '一句话描述需求，例如「做一个记账网页」' },
-        desc: { type: 'string', description: '补充细节：功能点、输入输出、样式要求' },
-        project: { type: 'string', description: '项目标识，留空由工作台生成' },
+        title: { type: 'string' },
+        desc: { type: 'string' },
+        project: { type: 'string' },
       },
       required: ['title'],
     },
@@ -57,8 +57,8 @@ const TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        state: { type: 'string', description: '只看某个状态的任务' },
-        limit: { type: 'number', description: '最多返回几条，默认 20' },
+        state: { type: 'string' },
+        limit: { type: 'number' },
       },
     },
     run: async ({ state, limit }) => {
@@ -85,7 +85,7 @@ const TOOLS = [
     description: '查任务详情：阶段、门禁结果、产物路径。',
     inputSchema: {
       type: 'object',
-      properties: { id: { type: 'string', description: '任务 id' } },
+      properties: { id: { type: 'string' } },
       required: ['id'],
     },
     run: async ({ id }) => {
@@ -113,8 +113,8 @@ const TOOLS = [
       type: 'object',
       properties: {
         id: { type: 'string' },
-        state: { type: 'string', description: 'triage/todo/doing/review/done/blocked' },
-        reason: { type: 'string', description: '移动原因，可选' },
+        state: { type: 'string', enum: ['triage','todo','doing','review','done','blocked'] },
+        reason: { type: 'string' },
       },
       required: ['id', 'state'],
     },
@@ -127,8 +127,8 @@ const TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        q: { type: 'string', description: '关键词，空格分隔，留空返回最近的记忆' },
-        limit: { type: 'number', description: '最多几条，默认 10' },
+        q: { type: 'string' },
+        limit: { type: 'number' },
       },
     },
     run: async ({ q, limit }) => {
@@ -155,9 +155,9 @@ const TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        content: { type: 'string', description: '要记住的内容，一条一件事，写清结论' },
-        project: { type: 'string', description: '归属项目，可选' },
-        tags: { type: 'array', items: { type: 'string' }, description: '标签，可选' },
+        content: { type: 'string' },
+        project: { type: 'string' },
+        tags: { type: 'array', items: { type: 'string' } },
       },
       required: ['content'],
     },
