@@ -51,3 +51,11 @@
     # only applies at startup.
     - id: ios-host
       name: ./plugins/ios-host/index.mjs
+    # 自动守卫：把「靠自觉」的规矩变成引擎每轮自己跑。
+    # 挂在 turn/start、tool/result、compaction/start 三个事件上，
+    # 超轮次红线、工具连续失败、上下文要压缩时提醒人——不用谁去记着调工具。
+    - id: auto-guard
+      name: ./plugins/auto-guard/index.mjs
+      config:
+        turnsMax: 40
+        repeatMax: 3
