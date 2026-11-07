@@ -37,7 +37,8 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: engine/package-lock.json
+          # lock 已删除（曾与 package.json 漂移导致解析不可控），npm 缓存按 package.json
+          cache-dependency-path: engine/package.json
 
       - name: Xcode
         run: xcodebuild -version
