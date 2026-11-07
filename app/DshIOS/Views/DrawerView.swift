@@ -34,6 +34,8 @@ struct DrawerView: View {
     let newConversation: (Workspace) -> Void
     let openSettings: () -> Void
     let openSchedules: () -> Void
+    /// 左上角这个菜单里的「添加第三方 API」：接中转站不该先翻进设置再找模型页。
+    let openThirdParty: () -> Void
     let openCordis: () -> Void
     let openSignIn: () -> Void
     /// Bumped to put the cursor in the search field (⌘K).
@@ -116,6 +118,7 @@ struct DrawerView: View {
             .padding(.trailing, search.isEmpty ? 14 : 2)
             .frame(minHeight: 44)
             .background(Palette.bubble, in: Capsule())
+            thirdPartyButton
             viewMenu
         }
         .padding(.leading, 16)
@@ -142,6 +145,18 @@ struct DrawerView: View {
         .padding(.bottom, 6)
     }
 
+    /// 侧边栏左上角这一格：接入第三方 API。放在最显眼处而不是收进底部菜单，
+    /// 因为换地址、加中转站是拿到 App 之后第一件常做的事。
+    private var thirdPartyButton: some View {
+        Button { openThirdParty() } label: {
+            Image(systemName: "bolt.horizontal.circle")
+                .font(.subheadline)
+                .foregroundStyle(Palette.ink)
+                .hitTarget()
+        }
+        .accessibilityLabel("添加第三方 API")
+    }
+
     private var viewMenu: some View {
         Menu {
             Picker("分组方式", selection: $groupBy) {
@@ -166,6 +181,7 @@ struct DrawerView: View {
     private var settingsRow: some View {
         Menu {
             Button(action: openSettings) { Label("设置", systemImage: "gearshape") }
+            Button(action: openThirdParty) { Label("添加第三方 API", systemImage: "bolt.horizontal.circle") }
             Button(action: openSchedules) {
                 if let count = app.scheduleCount, count > 0 {
                     Label("自动化（\(count)）", systemImage: "clock")
