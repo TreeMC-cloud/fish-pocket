@@ -45,6 +45,9 @@ const KINDS = {
   memory: { label: '记忆习惯', hint: '记什么、多久清理' },
 };
 
+// 空跑开关：默认只打印计划，加 --go 才真执行。
+const GO = process.argv.includes('--go');
+
 function fail(msg) {
   console.error(`错误：${msg}`);
   process.exit(2);
@@ -58,6 +61,9 @@ function read() {
   }
 }
 function write(list) {
+  // 空跑：默认只告诉要写什么，加 --go 才落盘。
+  // 偏好写错会影响后续所有对话的自我认知，值得多一道确认。
+  if (!GO) { console.log('   [空跑] 将写入偏好：' + list.length + ' 条'); return; }
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
   fs.writeFileSync(FILE, JSON.stringify(list, null, 2), 'utf8');
 }
@@ -74,7 +80,9 @@ function resolveKind(raw) {
   fail(`不认识的类别「${raw}」。可用：${Object.keys(KINDS).join(' / ')}`);
 }
 
-const argv = process.argv.slice(2);
+// 过滤掉 --go：它是开关，不是内容。不过滤的话会写进偏好正文
+// （实测把「叫我宿主」写成了「叫我宿主 --go」）。
+const argv = process.argv.slice(2).filter(a => a !== '--go');
 const cmd = argv[0];
 
 if (!cmd || cmd === 'help') {
@@ -141,7 +149,7 @@ if (cmd === 'set') {
   const item = { id: `p${Date.now().toString(36)}`, kind, text, at: new Date().toISOString().slice(0, 19) };
   list.push(item);
   write(list);
-  console.log(`✓ 已记（${KINDS[kind].label}）：${text}`);
+  console.log(GO ? `✓ 已记（${KINDS[kind].label}）：${text}` : `（空跑）会记进${KINDS[kind].label}：${text}`);
   process.exit(0);
 }
 
