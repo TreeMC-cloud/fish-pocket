@@ -77,6 +77,15 @@ jobs:
       - name: Assemble engine
         run: scripts/build-engine.sh
 
+      # CI 提速：engine 产物树缓存（npm install + 剪枝省 2-4 分钟）。
+      # 键 = build-engine.sh 本身 + engine 全部源码的哈希，任一变化自动失效。
+      - name: Cache engine tree
+        id: engine
+        uses: actions/cache@v5
+        with:
+          path: .engine-cache
+          key: engine-${{ hashFiles('scripts/build-engine.sh', 'engine/**') }}
+
       - name: Generate project
         run: |
           command -v xcodegen >/dev/null || brew install xcodegen
