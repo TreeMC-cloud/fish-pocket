@@ -165,6 +165,11 @@ final class AppModel {
     /// Subagent children by parent, rebuilt with the list; rows ask per redraw.
     @ObservationIgnored private(set) var childSessions: [String: [String]] = [:]
 
+    /// 自动守卫提醒的读取位置（已读到 notices.jsonl 的第几行）。
+    /// 用行号而不是文件哈希：同一条提醒只弹一次，重启也不会重弹旧的。
+    @ObservationIgnored private var noticeLine = 0
+    @ObservationIgnored private var noticeTask: Task<Void, Never>?
+
     init(launchURL: URL) {
         client = EngineClient(launchURL: launchURL)
         mux = StreamMux(client: client)
@@ -185,8 +190,43 @@ final class AppModel {
             account.follow()
             BackgroundKeeper.shared.attach { [weak self] in await self?.refreshSessions() }
             LiveActivityController.shared.attach(self)
+            // 自动守卫的提醒：引擎侧的插件（auto-guard）把提醒追加到 notices.jsonl，
+            // 这里轮询读出来弹 toast。为什么走文件而不是直接调用：
+            // 插件跑在 Node worker 里，碰不到 SwiftUI；文件是两边都能碰的地方。
+            watchAutoGuardNotices()
         } catch {
             lastError = error.localizedDescription
+        }
+    }
+
+    /// 轮询引擎写的提醒文件，读到新的就弹 toast。
+    ///
+    /// 用「读到第几行」而不是「文件是否变化」：引擎重启后文件不会清空，
+    /// 靠行号能保证同一条提醒只弹一次，也不会因为重启把旧提醒再弹一遍。
+    private func watchAutoGuardNotices() {
+        guard noticeTask == nil else { return }
+        let url = EnginePaths.real(EnginePaths.shared).appendingPathComponent("notices.jsonl")
+        noticeTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                guard let self else { return }
+                // 读盘放到后台：这个循环每 3 秒跑一次，主线程读文件会卡住滚动和输入。
+                // detached 里只做纯 IO，不碰任何 UI 状态。
+                let text = await Task.detached(priority: .utility) {
+                    try? String(contentsOf: url, encoding: .utf8)
+                }.value
+                guard let text else { continue }
+                let lines = text.split(separator: "\n", omittingEmptySubsequences: true)
+                if lines.count < self.noticeLine { self.noticeLine = 0 }  // 文件被清过
+                guard lines.count > self.noticeLine else { continue }
+                for line in lines[self.noticeLine...] {
+                    guard let data = line.data(using: .utf8),
+                          let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                          let message = obj["message"] as? String else { continue }
+                    showToast(message, duration: 8)
+                }
+                self.noticeLine = lines.count
+            }
         }
     }
 
