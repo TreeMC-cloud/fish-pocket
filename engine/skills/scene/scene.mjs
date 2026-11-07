@@ -30,6 +30,9 @@ const MARK_END = '<!-- SCENE:END -->';
 const PREF_START = '<!-- PREFS:BEGIN -->';
 const PREF_END = '<!-- PREFS:END -->';
 
+// 空跑开关：默认只打印计划，加 --go 才真执行。
+const GO = process.argv.includes('--go');
+
 function fail(msg) {
   console.error(`错误：${msg}`);
   process.exit(2);
@@ -155,10 +158,12 @@ function writeInto(file, block) {
     const withPref = replaceBlock(out, PREF_START, PREF_END, prefPart.trimEnd());
     out = withPref === null ? out.trimEnd() + '\n\n' + prefPart.trimEnd() + '\n' : withPref;
   }
+  // 空跑：场景身份会进每轮注入的 AGENTS.md，写错影响所有后续对话。
+  if (!GO) { console.log('   [空跑] 将写入 ' + file); console.log('   加 --go 才会真执行。'); return; }
   fs.writeFileSync(file, out, 'utf8');
 }
 
-const argv = process.argv.slice(2);
+const argv = process.argv.slice(2).filter(a => a !== '--go');
 const cmd = argv[0];
 
 if (!cmd || cmd === 'help') {
