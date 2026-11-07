@@ -26,6 +26,25 @@ struct SettingsView: View {
 
     private var mirror: SettingsMirror { app.settings }
 
+    /// 「远程工作台」这一行显示的状态：留空即纯本地，配了地址就显示主机名。
+    /// 只读 user.patch.yml 的 url 字段，不解析整个文件。
+    private var remoteWorkbenchSummary: String {
+        let url = EnginePaths.real(EnginePaths.shared).appendingPathComponent("user.patch.yml")
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else {
+            return String(localized: "纯本地")
+        }
+        for line in text.split(separator: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("url:") else { continue }
+            let raw = String(trimmed.dropFirst(4)).trimmingCharacters(in: .whitespaces)
+                .replacingOccurrences(of: "\"", with: "")
+                .replacingOccurrences(of: "/mcp", with: "")
+            if let host = URL(string: raw)?.host { return host }
+            return raw.isEmpty ? String(localized: "纯本地") : raw
+        }
+        return String(localized: "纯本地")
+    }
+
     private var engineRunning: Bool {
         if case .running = engine.phase { return true }
         return false
@@ -45,6 +64,9 @@ struct SettingsView: View {
                         valueRow("账号", app.account.signedIn ? (app.account.displayName ?? String(localized: "已登录")) : String(localized: "未登录"))
                     }
                     NavigationLink { ModelProvidersPage() } label: { valueRow("模型", defaultModel ?? "") }
+                    NavigationLink { RemoteWorkbenchPage() } label: {
+                        valueRow("远程工作台", remoteWorkbenchSummary)
+                    }
                     Button { addingThirdParty = true } label: {
                         HStack {
                             Text("添加第三方 API").foregroundStyle(Palette.ink)
