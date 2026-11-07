@@ -32,7 +32,9 @@ cp -R "$src/skills" "$out/skills"
 # 不再用 --legacy-peer-deps：它会让 npm 跳过全部 peer 依赖，
 # 上一版就是这样缺了 @deepseek-ai/cordis-plugin-group，引擎起不来。
 # 现在的做法是显式声明所有 peer，并把 dsh-llm 换成本地最小 shim
-# （file:./shims/dsh-llm-min），从根上消除版本冲突，严格解析就能过。
+# （file:./shims/dsh-llm = 真包 0.2.2-rc.1 完整代码，仅摘除会与宿主冲突的 peer 声明）。
+# 注意：不能用「只实现 3 个函数」的最小 shim —— dsh-web 等几十个插件要从 dsh-llm
+# import HarnessError 等大量符号，最小 shim 会让它们全部加载失败（真机实测教训）。
 # 双保险：严格装失败（含 npm 自身崩溃，如 null reading 'matches'）时
 # 自动降级到 --legacy-peer-deps 重试一次 —— 现在 5 个 peer 是显式依赖，
 # legacy 模式不会漏装它们，安全。
@@ -95,8 +97,12 @@ rm -rf "$nm"/sql.js "$nm"/typescript "$nm"/pnpm "$nm"/openai "$nm"/@anthropic-ai
        "$nm"/@google "$nm"/@smithy
 # 剪枝后冒烟必须放在这里：验证的是“最终形态”（物化目录 + 无链接 + 已裁剪），
 # CI 验证过的树 ≠ 打进 .app 的树，真机跑的是后者。
+# dsh-web 是必须测的：它从 dsh-llm import HarnessError，最小 shim 时代就是它先炸。
 (cd "$out" && node --input-type=module -e "
+  const llm = await import('@deepseek-ai/dsh-llm');
+  if (typeof llm.HarnessError !== 'function') throw new Error('dsh-llm shim missing HarnessError');
   await import('@deepseek-ai/dsh-app-boot');
+  await import('@deepseek-ai/dsh-web');
   await import('meow-memory');
 " > /tmp/engine-smoke.log 2>&1) || { echo "engine: smoke import failed:" >&2; grep -v 'Warning' /tmp/engine-smoke.log >&2 || cat /tmp/engine-smoke.log >&2; exit 1; }
 echo "engine: post-prune smoke OK"
