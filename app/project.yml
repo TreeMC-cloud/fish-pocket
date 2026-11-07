@@ -16,8 +16,8 @@ settings:
     # One version everywhere: the app, its extension, the App Store and the `v<version>` release tag.
     # Changing it sends the TestFlight public beta back through review: a beta build bumps the build number.
     # App Store and GitHub releases do bump it, or the update check never sees them.
-    MARKETING_VERSION: "1.0.0"
-    CURRENT_PROJECT_VERSION: "9"
+    MARKETING_VERSION: "1.0.1"
+    CURRENT_PROJECT_VERSION: "10"
 targets:
   DshIOS:
     type: application
