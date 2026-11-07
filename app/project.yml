@@ -16,8 +16,8 @@ settings:
     # One version everywhere: the app, its extension, the App Store and the `v<version>` release tag.
     # Changing it sends the TestFlight public beta back through review: a beta build bumps the build number.
     # App Store and GitHub releases do bump it, or the update check never sees them.
-    MARKETING_VERSION: "1.0.1"
-    CURRENT_PROJECT_VERSION: "10"
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "8"
 targets:
   DshIOS:
     type: application
@@ -79,6 +79,11 @@ targets:
           NSAllowsLocalNetworking: true
           # The workbench browser previews what the agent serves, plain http included.
           NSAllowsArbitraryLoadsInWebContent: true
+          # 远程工作台：客户常把工作台跑在自己的服务器上并用 http://IP:8092 连接
+          # （内网或没配证书的公网）。只允许本地网络时，Swift 的 URLSession 会
+          # 被 ATS 拦掉，而引擎侧走 Node 原始 socket 不受限——于是「测试连接失败
+          # 但实际能用」。允许任意加载让两条路径看到同样的网络现实。
+          NSAllowsArbitraryLoads: true
         # BackgroundKeeper: silent audio when 设置 → 后台运行 →「静音音频」 is on (the default),
         # and continued-processing tasks while sessions run when「任务续跑」 is on (iOS 26, off by default).
         UIBackgroundModes: [audio]
