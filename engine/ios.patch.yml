@@ -59,3 +59,26 @@
       config:
         turnsMax: 40
         repeatMax: 3
+
+    # 七层记忆（淋雨家 Phant0Meow 的 meow-memory，376★）。
+    # 这一份取代我们自己的 scene/preferences/handoff 三套分散方案：
+    #   soul/user     — AI 人格 + 用户偏好（我原来的 scene + preferences）
+    #   project/fact  — 项目与原子事实（我原来的 HANDOFF.md）
+    #   lesson/rules  — 教训与规则（我原来的 AGENTS.md 铁律）
+    #   topic         — 进行中的话题
+    # 用法：首轮注入核心层，之后每轮只检索 top-2 命中（省 token），
+    # 空闲 3 小时自动 dream 整理（合并去重、软遗忘）。
+    - id: meow-memory
+      name: 'meow-memory'
+      config:
+        enabled: true
+        # 记忆目录放在工作区里，跟项目一起走
+        projectDir: '.dsh-meow'
+        # 中文语言包。不填会静默落回中文，但显式写清楚更好。
+        promptLang: 'zh'
+        # 每轮关键词命中的条目数上限。2 是插件默认，也是他的推荐值。
+        hitTopK: 2
+        dream:
+          enabled: true
+          # 空闲 3 小时才整理，避免边聊边蒸馏抢 token
+          idleMinutes: 180
