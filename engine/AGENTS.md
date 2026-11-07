@@ -93,4 +93,6 @@ node "$DSH_TOOLS/dispatch-protocol/sentinel.mjs" open   # 我发出没回的
 | `router` | 用户给笼统指令，要判断该谁做 |
 | `toolbox` | 要加新功能时，先去零件库查有没有现成的 |
 | `scene` | 开场认领身份：我在哪个工作区、负责什么、不碰什么 |
+| `rotate` | 会话干太久了，写交接然后换 |
+| `shared` | 跨场景的待办 / 通知 / 索引 |
 | `ios-environment` | 不确定某个 shell 命令能不能用 |
