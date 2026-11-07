@@ -54,7 +54,15 @@
 - 上下文越长越费钱：新的一轮会读旧轮次内容。**主动换会话**，别等压缩。
 - AI 之间会无限礼貌地来回确认，一晚能烧光余额。**同一件事 ≤3 条消息，收到回执就结束。**
 
-细则见 `cost-guard` 技能。
+三个能跑的工具（退出码 0=没问题 / 1=有问题 / 2=用法错）：
+
+```sh
+node "$DSH_TOOLS/cost-guard/load.mjs" check      # 现在能不能再派活
+node "$DSH_TOOLS/cost-guard/turns.mjs" status    # 是不是该换会话了
+node "$DSH_TOOLS/dispatch-protocol/sentinel.mjs" open   # 我发出没回的
+```
+
+细则见 `cost-guard` 和 `dispatch-protocol` 技能。
 
 ## 交付前自查
 
@@ -82,4 +90,5 @@
 | `remote-workbench` | 要用远程工作台能力时 |
 | `workbench-discipline` | 多项目/多客户，需要防记忆污染 |
 | `cost-guard` | 派活前、做批量任务、发现轮次很多 |
+| `router` | 用户给笼统指令，要判断该谁做 |
 | `ios-environment` | 不确定某个 shell 命令能不能用 |
