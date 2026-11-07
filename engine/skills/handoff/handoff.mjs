@@ -60,6 +60,9 @@ const TEMPLATE = `# 交接
 - <路径> — <这是什么>
 `;
 
+// 空跑开关：默认只打印计划，加 --go 才真执行。
+const GO = process.argv.includes('--go');
+
 function findFile(dir) {
   for (const name of ['HANDOFF.md', 'handoff.md']) {
     const candidate = path.join(dir, name);
@@ -159,7 +162,7 @@ function check(dir) {
 }
 
 // ---------- 入口 ----------
-const args = process.argv.slice(2);
+const args = process.argv.slice(2).filter(a => a !== '--go');
 const cmd = args[0];
 const dir = path.resolve(args[1] && !args[1].startsWith('-') ? args[1] : '.');
 
@@ -170,6 +173,8 @@ if (cmd === 'init') {
     process.exit(0);
   }
   const target = path.join(dir, 'HANDOFF.md');
+  // 空跑：交接模板会覆盖已有文件。
+  if (!GO) { console.log('   [空跑] 将创建 ' + target); console.log('   加 --go 才会真执行。'); process.exit(0); }
   fs.writeFileSync(target, TEMPLATE, 'utf8');
   console.log(`已创建：${target}`);
   console.log('填完第 4 节的「下一步」再开始干活。');
