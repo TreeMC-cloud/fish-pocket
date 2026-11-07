@@ -85,7 +85,10 @@ function resolveKind(raw) {
 const argv = process.argv.slice(2).filter(a => a !== '--go');
 const cmd = argv[0];
 
+// 显式 help 走 0；什么都不给算用法错误走 2。
+// 区别在于「你问了」和「你忘了说要干什么」——后者不该被当成成功。
 if (!cmd || cmd === 'help') {
+  const asked = cmd === 'help';
   console.log(`偏好 —— 六类
 
 ${Object.entries(KINDS).map(([k, v]) => `  ${k.padEnd(12)} ${v.label}  ${v.hint}`).join('\n')}
@@ -98,7 +101,7 @@ ${Object.entries(KINDS).map(([k, v]) => `  ${k.padEnd(12)} ${v.label}  ${v.hint}
   prefs.mjs inject                  输出注入文本
 
 文件：${FILE}`);
-  process.exit(0);
+  process.exit(asked ? 0 : 2);
 }
 
 if (cmd === 'list') {
