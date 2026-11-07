@@ -5,7 +5,7 @@ import SwiftUI
 /// regular width it is the split view's sidebar. With nothing selected — at
 /// launch, after archiving — a blank session in the current workspace opens.
 struct MainView: View {
-    enum Sheet: String, Identifiable { case settings, plugins, schedules, signIn, cordis; var id: String { rawValue } }
+    enum Sheet: String, Identifiable { case settings, plugins, schedules, signIn, cordis, thirdParty; var id: String { rawValue } }
 
     @Environment(AppModel.self) private var app
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -30,6 +30,8 @@ struct MainView: View {
     @State private var onboarding: Onboarding?
     /// 「添加 API Key」 was chosen in the sign-in sheet: its key editor follows once that sheet is gone.
     @State private var keyEditorRef: String?
+    /// 登录面板里选了「使用第三方 API」：等那张表关掉再开接入页，避免叠弹窗。
+    @State private var pendingThirdParty = false
     /// The ask for a Star or a share.
     @State private var supportDialog = false
 
@@ -157,6 +159,7 @@ struct MainView: View {
                 case .schedules: SheetStack { SchedulesView(openSession: open(session:)) }
                 case .signIn: SignInSheet()
                 case .cordis: CordisPanelView(currentSession: selection)
+                case .thirdParty: ThirdPartyAPISheet()
                 }
             }
             .sheetNotices()
@@ -164,7 +167,11 @@ struct MainView: View {
         .sheet(item: $onboarding, onDismiss: onboardingDismissed) { step in
             switch step {
             case .signIn(let ref, let autoStart):
-                SignInSheet(autoStart: autoStart, addAPIKey: { keyEditorRef = ref })
+                SignInSheet(
+                    autoStart: autoStart,
+                    addAPIKey: { keyEditorRef = ref },
+                    addThirdParty: { pendingThirdParty = true }
+                )
             case .key(let ref):
                 OnboardingKeySheet(ref: ref) { onboarding = nil }
             }
@@ -223,6 +230,17 @@ struct MainView: View {
 
     /// 「添加 API Key」 in the sign-in sheet hands over to the key editor once that sheet is gone.
     private func onboardingDismissed() {
+        if pendingThirdParty {
+            pendingThirdParty = false
+            keyEditorRef = nil
+            // 让关闭动画先走完，再挂下一张表：同一个 runloop 里换 sheet，
+            // 宿主视图已被拆掉，那张表可能根本不出现。
+            Task {
+                try? await Task.sleep(for: .milliseconds(350))
+                sheet = .thirdParty
+            }
+            return
+        }
         guard let ref = keyEditorRef else { return }
         keyEditorRef = nil
         onboarding = .key(ref: ref)
@@ -363,6 +381,7 @@ struct MainView: View {
             newConversation: { workspace in workspaceId = workspace.id; newConversation(in: workspace); setDrawer(false) },
             openSettings: { sheet = .settings },
             openSchedules: { sheet = .schedules },
+            openThirdParty: { sheet = .thirdParty },
             openCordis: { sheet = .cordis },
             openSignIn: { sheet = .signIn },
             searchRequest: searchRequest,
