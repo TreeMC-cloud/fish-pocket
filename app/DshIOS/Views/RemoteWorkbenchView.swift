@@ -319,10 +319,25 @@ struct RemoteWorkbenchPage: View {
     }
 
     /// 双引号包裹并转义，避免口令里的 `:` `#` 破坏 YAML。
+    ///
+    /// 换行必须转成字面量 `\n`：双引号标量里可以直接放换行，但那样读回来是
+    /// 真正的换行符，和我们写进去的值不一致——口令里带空白字符时表现为
+    /// 「测试连接能过，实际鉴权失败」，很难查。其余控制字符同理按 YAML 的
+    /// 双引号转义规则处理。
     private func yamlScalar(_ value: String) -> String {
-        let escaped = value
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
+        var escaped = ""
+        escaped.reserveCapacity(value.count + 2)
+        for character in value {
+            switch character {
+            case "\\": escaped += "\\\\"
+            case "\"": escaped += "\\\""
+            case "\n": escaped += "\\n"
+            case "\r": escaped += "\\r"
+            case "\t": escaped += "\\t"
+            case "\0": escaped += "\\0"
+            default: escaped.append(character)
+            }
+        }
         return "\"\(escaped)\""
     }
 
