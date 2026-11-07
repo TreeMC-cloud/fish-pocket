@@ -25,13 +25,31 @@ const dirs = home
   : { DSH_HOME: path.join(data, 'dsh'), HOME: path.join(data, 'home'), TMPDIR: path.join(data, 'tmp'), workspace: path.join(data, 'workspace') };
 for (const dir of Object.values(dirs)) fs.mkdirSync(dir, { recursive: true });
 
-// 全局铁律：随包分发的 AGENTS.md 复制到 $DSH_HOME/AGENTS.md，每轮注入。
-// dsh-agent-instructions 只读 $DSH_HOME/AGENTS.md 这一处，不读包内路径；
-// 每次启动都覆盖写，这样 App 升级后铁律跟着更新，用户改的东西留在别处不动。
+// 全局铁律：随包分发的 AGENTS.md 装到 $DSH_HOME/AGENTS.md，每轮注入。
+// dsh-agent-instructions 只读这一处，不读包内路径。
+//
+// 关键：不能每次启动都覆盖写。场景身份（scene.mjs 写的 SCENE 段）和用户
+// 自己加的内容都在这个文件里，覆盖会把它们冲掉——表现为「配好的场景重启后没了」。
+// 做法：包内铁律放在 SCENE 段之外的前半部分，启动时只重写那一段，
+// 保留 SCENE 段和用户追加的内容。
 const rules = path.join(path.dirname(fileURLToPath(import.meta.url)), 'AGENTS.md');
 const rulesTarget = path.join(dirs.DSH_HOME, 'AGENTS.md');
 try {
-  if (fs.existsSync(rules)) fs.copyFileSync(rules, rulesTarget);
+  if (fs.existsSync(rules)) {
+    const bundled = fs.readFileSync(rules, 'utf8');
+    if (!fs.existsSync(rulesTarget)) {
+      fs.writeFileSync(rulesTarget, bundled, 'utf8');
+    } else {
+      const existing = fs.readFileSync(rulesTarget, 'utf8');
+      // 场景段和它之后的内容全部保留（那是运行时生成的 + 用户加的）
+      const mark = existing.indexOf('<!-- SCENE:BEGIN -->');
+      const tail = mark >= 0 ? existing.slice(mark) : '';
+      // 用户可能还写了别的东西：以包内铁律的结尾为准，找最后一行非空内容之后
+      const next = tail ? `${bundled.trimEnd()}\n\n${tail}` : existing;
+      // 只有在内容真的变了时才写盘，避免每次都改 mtime
+      if (next !== existing) fs.writeFileSync(rulesTarget, next, 'utf8');
+    }
+  }
 } catch (error) {
   console.error('[dsh-ios] could not install AGENTS.md', error);
 }
