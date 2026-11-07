@@ -15,7 +15,16 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const OUT = process.argv[2] || path.join(HERE, 'index.json');
+// 无参数时只打印用法：这个脚本会发起几十次网络请求，
+// 不该被"顺手跑一下"意外触发。要给输出路径才真的下载。
+if (process.argv.length < 3) {
+  console.error('用法：node fetch-index.mjs <输出路径>');
+  console.error('  例如：node fetch-index.mjs ./index.json');
+  console.error('  会从 https://www.mydsh.xyz/market/index.json 拉取零件库索引。');
+  console.error('  已有文件不会被覆盖，除非先删掉它。');
+  process.exit(2);
+}
+const OUT = process.argv[2];
 const URL = 'https://www.mydsh.xyz/market/index.json';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0';
 
