@@ -207,6 +207,14 @@ final class AppModel {
         guard noticeTask == nil else { return }
         let url = EnginePaths.real(EnginePaths.shared).appendingPathComponent("notices.jsonl")
         noticeTask = Task { @MainActor [weak self] in
+            // 先把"现在文件里有多少条"记成基线，只弹之后新增的。
+            // 不这么做的话，第一次启动 noticeLine=0，会把历史提醒全弹一遍 ——
+            // 用户装完 App 一打开就被几周前的提醒轰炸，然后关掉通知。
+            if let existing = await Task.detached(priority: .utility, operation: {
+                try? String(contentsOf: url, encoding: .utf8)
+            }).value {
+                self?.noticeLine = existing.split(separator: "\n", omittingEmptySubsequences: true).count
+            }
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
                 guard let self else { return }
@@ -223,7 +231,7 @@ final class AppModel {
                     guard let data = line.data(using: .utf8),
                           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                           let message = obj["message"] as? String else { continue }
-                    showToast(message, duration: 8)
+                    self.showToast(message, duration: 8)
                 }
                 self.noticeLine = lines.count
             }
