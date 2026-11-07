@@ -29,7 +29,12 @@ cp -R "$src/runtime" "$out/runtime"
 cp -R "$src/skills" "$out/skills"
 [ -f "$src/package-lock.json" ] && cp "$src/package-lock.json" "$out/"
 
-(cd "$out" && npm install --omit=dev --os=ios --cpu=arm64 --ignore-scripts --no-audit --no-fund --loglevel=error)
+# --legacy-peer-deps 是必需的，不是偷懒：
+#   dsh-llm@0.0.1-rc.1 的 peer 要求 dsh-brand/timeout/attachment/invariants 是 ^0.0.1-rc.1，
+#   而宿主 dsh@0.2.2-rc.1 依赖的是同名的 0.2.2-rc.1。两套版本号互不满足，
+#   严格模式下 npm 直接 ERESOLVE 失败。它们其实是同一个包的两次改名/升版，
+#   API 兼容（都导出同一批符号），所以按老版本来解析是安全的。
+(cd "$out" && npm install --omit=dev --os=ios --cpu=arm64 --ignore-scripts --no-audit --no-fund --legacy-peer-deps --loglevel=error)
 
 nm="$out/node_modules"
 before=$(du -sk "$nm" | cut -f1)
