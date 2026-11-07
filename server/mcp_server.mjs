@@ -290,10 +290,24 @@ async function handleRpc(msg) {
 
   if (method === 'tools/call') {
     const name = params?.name;
+    if (typeof name !== 'string' || name.length === 0) {
+      // 说清缺什么，别让模型看到 "未知工具: undefined" 然后去猜。
+      return rpcError(id, -32602, 'tools/call 需要 params.name（字符串）');
+    }
     const tool = TOOLS.find((t) => t.name === name);
-    if (!tool) return rpcError(id, -32602, `未知工具: ${name}`);
+    if (!tool) {
+      const known = TOOLS.map((t) => t.name).join(', ');
+      return rpcError(id, -32602, `没有这个工具：${name}。可用工具：${known}`);
+    }
+    // arguments 必须是对象。传字符串/数组时直接拒绝，否则它会穿过校验
+    // 一路走到真实调用，报出来的是无关的网络错误。
+    const rawArgs = params?.arguments;
+    if (rawArgs !== undefined && rawArgs !== null &&
+        (typeof rawArgs !== 'object' || Array.isArray(rawArgs))) {
+      return rpcError(id, -32602, 'tools/call 的 params.arguments 必须是对象');
+    }
     try {
-      const out = await tool.run(params?.arguments || {});
+      const out = await tool.run(rawArgs || {});
       return rpcResult(id, {
         content: [{ type: 'text', text: JSON.stringify(out, null, 2) }],
         isError: false,
