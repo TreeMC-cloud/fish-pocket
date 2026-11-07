@@ -20,6 +20,9 @@ if [ -f "$root/.engine-cache/nodejs-project.tar" ]; then
   exit 0
 fi
 cp "$src/package.json" "$src/main.mjs" "$src/boot.mjs" "$src/ios.patch.yml" "$out/"
+# 全局铁律：main.mjs 在启动时把它复制到 $DSH_HOME/AGENTS.md，每轮注入。
+# 漏了这个文件，规则就只是文档里的一句话，不会真的进模型。
+[ -f "$src/AGENTS.md" ] && cp "$src/AGENTS.md" "$out/"
 cp -R "$src/plugins" "$out/plugins"
 cp -R "$src/shims" "$out/shims"
 cp -R "$src/runtime" "$out/runtime"
