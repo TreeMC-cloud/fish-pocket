@@ -72,6 +72,19 @@ sh "$DSH_TOOLS/handoff/preflight.sh" .
 
 > 交接已写好，可以换会话了。点左上角的「＋」新建一个，或者在侧边栏里开新的。旧会话会自动留在列表里。
 
+### 3.5 旧交接自动进归档
+
+`preflight.sh` 的第 4 步会**自动**把当前 `HANDOFF.md` 存一份进归档层（只进不改）。
+
+你不需要单独做。想手动归档或回溯：
+
+```sh
+node "$DSH_TOOLS/handoff/archive.mjs" list            # 看归档
+node "$DSH_TOOLS/handoff/archive.mjs" restore <名字>   # 取回
+```
+
+**为什么归档：** 换会话时旧交接不能删——那是证据。但也不能留在入口（没人读）。所以搬走不删。
+
 ### 4. 换完之后
 
 新会话开场会读 `.scene.json` 和 `HANDOFF.md`，自动接上进度。**如果没接上，说明交接写得不够具体。**
