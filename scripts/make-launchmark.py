@@ -1,90 +1,63 @@
 #!/usr/bin/env python3
 """把 LaunchMark 画成 Σ。
 
-上一轮的版本其实还是旧的 Z（两条横线 + 一道斜杠），系统启动屏一直显示它，
-所以「换了 logo 却没换」的观感始终存在。这里用几何绘制，不依赖任何外部库。
+历史：第一版路径画反了（少两个折角），出来像数字 5，已被推进仓库一次。
+这里用 numpy 向量化重写，顺便把形状定义成一眼能核对的坐标。
 
-Σ 的形状：上横、右上短竖折向左下、下横，中间一道斜线连接。
-用超采样抗锯齿，保证在小尺寸和放大时都干净。
+Σ 骨架（y 向下）：
+    右上 ──────── 左上
+      │              ╲
+      │               ╲ 尖角朝左
+      │               ╱
+      │              ╱
+    右下 ──────── 左下
+  两个短竖折角：上横右端向下、下横右端向上。
 """
-import struct, zlib, sys, os
+import struct, zlib, os
+import numpy as np
+from PIL import Image, ImageDraw
+
+SS = 4  # 超采样
 
 def draw(size, ink):
-    SS = 4                      # 超采样倍数
     W = size * SS
-    # 归一化坐标（0..1）下的 Σ 骨架，用多段折线描边
-    # 上横：从右上到左上；斜：左上→中心→左下；下横：左下→右下
-    lw = 0.085 * W              # 笔画宽度
-    # 关键点（x, y），y 向下
-    x0, x1 = 0.16 * W, 0.84 * W
-    y0, y1 = 0.20 * W, 0.80 * W
-    yc = 0.50 * W
-    xm = 0.58 * W
-    path = [
-        [(x1, y0), (x0, y0)],                    # 上横
-        [(x0, y0), (xm, yc)],                    # 上斜
-        [(xm, yc), (x0, y1)],                    # 下斜
-        [(x0, y1), (x1, y1)],                    # 下横
-    ]
+    img = Image.new('L', (W, W), 0)
+    d = ImageDraw.Draw(img)
+    lw = max(1, int(round(0.082 * W)))
 
-    img = bytearray(W * W * 4)   # RGBA，初始全透明
+    xl, xr = 0.14, 0.86
+    yt, yb = 0.16, 0.84
+    yc = 0.50
+    xm = 0.60
+    drop = 0.10
 
-    def seg_dist(px, py, ax, ay, bx, by):
-        dx, dy = bx - ax, by - ay
-        L2 = dx * dx + dy * dy
-        if L2 == 0:
-            return ((px - ax) ** 2 + (py - ay) ** 2) ** 0.5
-        t = ((px - ax) * dx + (py - ay) * dy) / L2
-        t = max(0.0, min(1.0, t))
-        cx, cy = ax + t * dx, ay + t * dy
-        return ((px - cx) ** 2 + (py - cy) ** 2) ** 0.5
+    P = lambda x, y: (x * W, y * W)
+    # 上横 + 右上折角
+    d.line([P(xr, yt), P(xl, yt)], fill=255, width=lw, joint='curve')
+    d.line([P(xr, yt), P(xr, yt + drop)], fill=255, width=lw)
+    # 上斜 / 下斜（尖角在 xm）
+    d.line([P(xl, yt), P(xm, yc)], fill=255, width=lw, joint='curve')
+    d.line([P(xm, yc), P(xl, yb)], fill=255, width=lw, joint='curve')
+    # 下横 + 右下折角
+    d.line([P(xl, yb), P(xr, yb)], fill=255, width=lw, joint='curve')
+    d.line([P(xr, yb), P(xr, yb - drop)], fill=255, width=lw)
 
-    half = lw / 2
-    r, g, b = ink
-    for y in range(W):
-        for x in range(W):
-            d = min(
-                seg_dist(x + 0.5, y + 0.5, seg[0][0], seg[0][1], seg[1][0], seg[1][1])
-                for seg in path
-            )
-            if d <= half:
-                a = 255
-            elif d <= half + 1:
-                a = int(255 * (half + 1 - d))
-            else:
-                a = 0
-            if a:
-                o = (y * W + x) * 4
-                img[o], img[o+1], img[o+2], img[o+3] = r, g, b, a
+    img = img.resize((size, size), Image.LANCZOS)
+    a = np.array(img, dtype=np.uint8)
+    rgba = np.zeros((size, size, 4), dtype=np.uint8)
+    rgba[..., 0], rgba[..., 1], rgba[..., 2] = ink
+    rgba[..., 3] = a
+    return rgba
 
-    # 下采样到目标尺寸（盒式平均）
-    out = bytearray(size * size * 4)
-    n = SS * SS
-    for y in range(size):
-        for x in range(size):
-            rr = gg = bb = aa = 0
-            for dy in range(SS):
-                for dx in range(SS):
-                    o = ((y * SS + dy) * W + (x * SS + dx)) * 4
-                    a = img[o+3]
-                    rr += img[o] * a; gg += img[o+1] * a; bb += img[o+2] * a; aa += a
-            o = (y * size + x) * 4
-            if aa:
-                out[o] = rr // aa; out[o+1] = gg // aa; out[o+2] = bb // aa; out[o+3] = aa // n
-            else:
-                out[o] = out[o+1] = out[o+2] = out[o+3] = 0
-    return bytes(out), size
+def write_png(path, rgba):
+    Image.fromarray(rgba, 'RGBA').save(path)
 
-def write_png(path, pixels, size):
-    raw = b''.join(b'\x00' + pixels[y*size*4:(y+1)*size*4] for y in range(size))
-    def chunk(t, d):
-        c = t + d
-        return struct.pack('>I', len(d)) + c + struct.pack('>I', zlib.crc32(c) & 0xffffffff)
-    png = b'\x89PNG\r\n\x1a\n'
-    png += chunk(b'IHDR', struct.pack('>IIBBBBB', size, size, 8, 6, 0, 0, 0))
-    png += chunk(b'IDAT', zlib.compress(raw, 9))
-    png += chunk(b'IEND', b'')
-    open(path, 'wb').write(png)
+def preview(rgba, cols=44):
+    h, w = rgba.shape[:2]
+    step = max(1, h//18); xs = max(1, w//cols)
+    for y in range(0, h, step):
+        print('  ' + ''.join('#' if rgba[y, x, 3] > 128 else ('+' if rgba[y, x, 3] > 40 else '.')
+                             for x in range(0, w, xs)))
 
 def main():
     base = 'app/DshIOS/Assets.xcassets/LaunchMark.imageset'
@@ -95,9 +68,11 @@ def main():
         ('LaunchMark-Dark@3x.png', 216, (245, 245, 247)),
     ]
     for name, size, ink in jobs:
-        px, s = draw(size, ink)
-        write_png(os.path.join(base, name), px, s)
-        print('wrote', name, size, 'x', size)
+        rgba = draw(size, ink)
+        write_png(os.path.join(base, name), rgba)
+        print('wrote', name)
+        if name == 'LaunchMark@2x.png':
+            preview(rgba)
 
 if __name__ == '__main__':
     main()
