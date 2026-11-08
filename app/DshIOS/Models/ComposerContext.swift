@@ -160,6 +160,23 @@ final class ComposerContext {
         return catalog.flatMap(\.models).first { $0.provider == selection.provider && $0.model == selection.model }
     }
 
+    /// 故障切换用：一个和当前不同的可用模型。
+    /// 优先目录默认；默认正是挂掉的那个时退到列表里下一个。整个目录只剩一个模型时返回 nil。
+    func alternateModel(_ model: SessionModel) -> ModelChoice? {
+        let current = currentChoice(model)
+        if let fallback = catalogDefault, let found = catalog.flatMap(\.models).first(where: {
+            $0.provider == fallback.provider && $0.model == fallback.model
+        }), found.id != current?.id {
+            return found
+        }
+        for group in catalog where !group.models.isEmpty {
+            for candidate in group.models where candidate.id != current?.id {
+                return candidate
+            }
+        }
+        return nil
+    }
+
     func modelName(_ model: SessionModel) -> String {
         guard let selection = selection(model) else {
             return catalogLoaded ? String(localized: "请选择模型") : String(localized: "正在加载模型…")
