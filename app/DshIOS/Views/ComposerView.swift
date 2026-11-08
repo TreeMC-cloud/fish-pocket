@@ -485,10 +485,30 @@ struct ComposerView: View {
     private var mainButton: some View {
         let empty = composer.nothingToSend
         let editing = composer.editingQueue != nil
-        HStack(spacing: 0) {
+        HStack(spacing: 6) {
+            // 运行中且草稿里有字时，排队的替代方案必须看得见：
+            // 之前只能在发送键上长按才能找到「插话」，等于没有。
+            if model.running && !empty && !editing { steerChip }
             if model.running { stopButton(prominent: empty && !editing) }
             if !model.running || !empty || editing { sendButton(empty: empty) }
         }
+    }
+
+    /// 立刻打断当前轮、把这句插进去。和排队一样是一下，不用长按。
+    private var steerChip: some View {
+        Button { Haptics.tap(); send(.steer) } label: {
+            HStack(spacing: 3) {
+                Image(systemName: "bolt.fill").font(.system(size: 10, weight: .bold))
+                Text("插队").font(.system(size: 12, weight: .semibold))
+            }
+            .foregroundStyle(Palette.ink)
+            .padding(.horizontal, 10)
+            .frame(height: 30)
+            .background(Palette.control, in: Capsule())
+            .hitTarget()
+        }
+        .accessibilityLabel("插队发送")
+        .accessibilityHint("打断正在进行的一轮，立刻把这句话交给它")
     }
 
     private func stopButton(prominent: Bool) -> some View {
