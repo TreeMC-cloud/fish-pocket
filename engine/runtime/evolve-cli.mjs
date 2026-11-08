@@ -10,6 +10,7 @@ import { pathToFileURL } from 'node:url';
 import { shouldRun, runDream, recentAudit } from './dream.mjs';
 import { evaluate, findConflicts, loadSkillIndex } from './skill-eval.mjs';
 import { report as statsReport } from './skill-stats.mjs';
+import { createMemoryStore, workspaceFromEnv } from './memory-store.mjs';
 
 const DATA = process.env.DSH_IOS_DATA || process.cwd();
 const SKILLS = process.env.DSH_BUNDLED_SKILL_DIR || path.join(DATA, '..', 'skills');
@@ -50,14 +51,32 @@ function cmdStatus() {
 
 function cmdRun(argv) {
   const force = argv.includes('--force');
+  const noStore = argv.includes('--no-store');
+
+  // 接上真实记忆库。--no-store 用于只想看产出的场合（不写库）。
+  let store = null;
+  if (!noStore) {
+    const workspace = workspaceFromEnv();
+    store = createMemoryStore(workspace, { project: path.basename(workspace) });
+    if (!store.available) {
+      console.log(`⚠ 记忆库不可用（${store.error ?? '未知原因'}），本次只产出不落库`);
+      store = null;
+    }
+  }
+
   const result = force
-    ? runDream(DATA, { minNew: 1 })
-    : runDream(DATA);
+    ? runDream(DATA, { minNew: 1, store })
+    : runDream(DATA, { store });
+  store?.close();
+
   if (!result.ran) {
     console.log(`没跑：${result.reason}`);
     return 0;
   }
-  console.log(`✓ 整理完成：处理 ${result.processed} 条 trace，产出 ${result.produced.length} 条候选`);
+  console.log(`✓ 整理完成：处理 ${result.processed} 条 trace，产出 ${result.produced.length} 条`);
+  console.log(store
+    ? `  已写入记忆库 ${result.stored} 条（procedural 层，带「未验证」前缀）`
+    : '  未落库（预览模式）');
   console.log('候选一律 verified=false，看过确认后才生效。');
   return 0;
 }
