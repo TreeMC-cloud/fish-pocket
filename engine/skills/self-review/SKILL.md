@@ -1,6 +1,10 @@
 ---
 name: self-review
 description: 做完一件事之后检查自己有没有搞砸。改完代码、交付出东西、或者用户说不对时用。
+version: 1.0.0
+source: handwritten
+permissions: [read-only]
+
 ---
 
 # 交付前自查
