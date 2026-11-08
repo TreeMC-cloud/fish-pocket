@@ -78,6 +78,18 @@ targets:
         NSCameraUsageDescription: 拍照后作为附件发给智能体。
         # Only standard TLS/HTTPS through Security.framework and Node's OpenSSL; no proprietary crypto.
         ITSAppUsesNonExemptEncryption: false
+        # 诊断上报走的是自建服务器的明文 HTTP（那台机器没有外网出口，签不了
+        # Let's Encrypt 证书），而 iOS 的 ATS 默认拒绝 http://，报
+        # 「App Transport Security policy requires the use of a secure connection」。
+        #
+        # **只对这一个地址开口子**，不开 NSAllowsArbitraryLoads：
+        # 那个开关会让整个 App（含内嵌浏览器）接受任意明文连接，
+        # 既没必要也是安全隐患。服务器换成 HTTPS 之后，这一整段可以删掉。
+        NSAppTransportSecurity:
+          NSExceptionDomains:
+            202.189.51.44:
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSIncludesSubdomains: false
         # The engine serves plain HTTP on 127.0.0.1 only.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
