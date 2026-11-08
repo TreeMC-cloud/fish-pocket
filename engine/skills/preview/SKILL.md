@@ -1,6 +1,10 @@
 ---
 name: preview
 description: 把结果做成能在 App 里直接看的页面或图表，而不是贴一大段文字。要展示 UI、报告、数据时用。
+version: 1.0.0
+source: handwritten
+permissions: [writes-files]
+
 ---
 
 # 直接把成果弹给用户看
