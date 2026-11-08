@@ -70,6 +70,8 @@ struct ConversationView: View {
             let session = SessionModel(sessionId: sessionId, app: app)
             session.subagentAddress = app.subagentAddress(for: sessionId)
             session.modelCatalog = context
+            // 引擎重启打断过这个会话：横幅只在打开时取一次，取走即清。
+            session.interruptedNotice = app.takeInterrupted(sessionId)
             model = session
             session.start()
             await context.load(session)
@@ -122,51 +124,60 @@ struct ConversationView: View {
         // A conversation that has started: the bar carries its title menu, not the model picker.
         let started = !blank && model.subagentAddress == nil && !(!model.loaded && app.sessions[sessionId]?.blank == true)
         ScrollViewReader { proxy in
-            ScrollView {
-                TimelineList(model: model)
-                    .modifier(LinkOpening())
-                Color.clear.frame(height: 1).id(Self.bottomId)
-            }
-            .environment(\.timelineScroll, TimelineScroll(keep: { id in
-                Task { @MainActor in
-                    // The rows above have to be laid out before their height can be kept.
-                    try? await Task.sleep(for: .milliseconds(60))
-                    proxy.scrollTo(id, anchor: .top)
-                }
-            }, top: timelineTop))
-            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { timelineTop = $0 }
-            .modifier(TimelineAnchor())
-            .modifier(BottomFollow(atBottom: $atBottom) { scrollToBottom(proxy, animated: false) })
-            // Any drag on the timeline hides the keyboard (`.interactively` only does when the finger reaches it),
-            // even when the timeline is too short to scroll; so does a tap outside the composer.
-            .scrollDismissesKeyboard(.immediately)
-            .scrollBounceBehavior(.always)
-            .simultaneousGesture(TapGesture().onEnded { dismissKeyboard() })
-            // The bottom anchor only holds for the first layout; follow the user's own message and the start of a turn.
-            .onChange(of: model.items.last?.id) { _, _ in
-                if case .user? = model.items.last { atBottom = true; scrollToBottom(proxy) }
-            }
-            .onChange(of: model.running) { _, running in if running, atBottom { scrollToBottom(proxy) } }
-            .overlay(alignment: .bottomTrailing) {
-                // Animated here, not on the scroll view: its rows must not animate with the buttons.
-                // 拆成独立子视图：原来内联的 VStack + 条件分支会让类型推断超时（CI 实测）。
-                BottomFloaters(
-                    show: !atBottom && !blank,
-                    showTurns: model.turnOutline.count >= 2,
-                    jumpTurns: { showTurns = true },
-                    backToBottom: {
-                        atBottom = true
-                        scrollToBottom(proxy)
+            VStack(spacing: 0) {
+                // 引擎重启打断了上一次任务：在时间线顶上挂一条，说清楚发生了什么。
+                // 放在滚动区外：它不该滚走，用户得先看见这个才明白为什么没有回答。
+                if let notice = model.interruptedNotice {
+                    InterruptedBanner(text: notice) {
+                        withAnimation(.snappy(duration: 0.2)) { model.interruptedNotice = nil }
                     }
-                )
-            }
-            .sheet(isPresented: $showTurns) {
-                TurnJumpSheet(outline: model.turnOutline) { entry in
-                    showTurns = false
-                    Task {
-                        if let anchor = await model.anchor(of: entry) {
-                            try? await Task.sleep(for: .milliseconds(120))
-                            proxy.scrollTo(anchor, anchor: .top)
+                }
+                ScrollView {
+                    TimelineList(model: model)
+                        .modifier(LinkOpening())
+                    Color.clear.frame(height: 1).id(Self.bottomId)
+                }
+                .environment(\.timelineScroll, TimelineScroll(keep: { id in
+                    Task { @MainActor in
+                        // The rows above have to be laid out before their height can be kept.
+                        try? await Task.sleep(for: .milliseconds(60))
+                        proxy.scrollTo(id, anchor: .top)
+                    }
+                }, top: timelineTop))
+                .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { timelineTop = $0 }
+                .modifier(TimelineAnchor())
+                .modifier(BottomFollow(atBottom: $atBottom) { scrollToBottom(proxy, animated: false) })
+                // Any drag on the timeline hides the keyboard (`.interactively` only does when the finger reaches it),
+                // even when the timeline is too short to scroll; so does a tap outside the composer.
+                .scrollDismissesKeyboard(.immediately)
+                .scrollBounceBehavior(.always)
+                .simultaneousGesture(TapGesture().onEnded { dismissKeyboard() })
+                // The bottom anchor only holds for the first layout; follow the user's own message and the start of a turn.
+                .onChange(of: model.items.last?.id) { _, _ in
+                    if case .user? = model.items.last { atBottom = true; scrollToBottom(proxy) }
+                }
+                .onChange(of: model.running) { _, running in if running, atBottom { scrollToBottom(proxy) } }
+                .overlay(alignment: .bottomTrailing) {
+                    // Animated here, not on the scroll view: its rows must not animate with the buttons.
+                    // 拆成独立子视图：原来内联的 VStack + 条件分支会让类型推断超时（CI 实测）。
+                    BottomFloaters(
+                        show: !atBottom && !blank,
+                        showTurns: model.turnOutline.count >= 2,
+                        jumpTurns: { showTurns = true },
+                        backToBottom: {
+                            atBottom = true
+                            scrollToBottom(proxy)
+                        }
+                    )
+                }
+                .sheet(isPresented: $showTurns) {
+                    TurnJumpSheet(outline: model.turnOutline) { entry in
+                        showTurns = false
+                        Task {
+                            if let anchor = await model.anchor(of: entry) {
+                                try? await Task.sleep(for: .milliseconds(120))
+                                proxy.scrollTo(anchor, anchor: .top)
+                            }
                         }
                     }
                 }
@@ -829,10 +840,49 @@ private struct TimelineRow: View, Equatable {
     }
 }
 
-/// 时间线右下角的浮动按钮组（回到底部 / 跳转到轮次）。
+/// 引擎重启打断了上一次任务时，时间线顶上那条横幅。
 ///
-/// 独立成一个 View 是为了让 `body` 里的类型推断有个明确的边界：
-/// 内联的 `ZStack { if … VStack { if … } }` + 两个闭包，CI 上直接判定超时。
+/// 为什么用横幅而不是在时间线里插一条假事件：会话历史属于引擎，客户端往里塞
+/// 一条自己编的事件，下次同步就会对不上。横幅是纯客户端状态，关掉就没了。
+private struct InterruptedBanner: View {
+    let text: String
+    let dismiss: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.footnote)
+                .foregroundStyle(Palette.waiting)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("上次的任务被打断了")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Palette.ink)
+                Text(text)
+                    .font(.caption)
+                    .foregroundStyle(Palette.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 4)
+            Button(action: dismiss) {
+                Image(systemName: "xmark")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(Palette.faint)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("关闭提示")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(Palette.field, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Palette.stroke))
+        .padding(.horizontal, 14)
+        .padding(.top, 8)
+    }
+}
+
+/// 时间线右下角的浮动按钮组（回到底部 / 跳转到轮次）。
 private struct BottomFloaters: View {
     let show: Bool
     let showTurns: Bool
