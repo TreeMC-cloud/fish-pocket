@@ -70,8 +70,9 @@ struct ConversationView: View {
             let session = SessionModel(sessionId: sessionId, app: app)
             session.subagentAddress = app.subagentAddress(for: sessionId)
             session.modelCatalog = context
-            // 引擎重启打断过这个会话：横幅只在打开时取一次，取走即清。
-            session.interruptedNotice = app.takeInterrupted(sessionId)
+            if let interrupted = app.takeInterrupted(sessionId) {
+                session.configureInterruptedState(message: interrupted.message, turn: interrupted.turn)
+            }
             model = session
             session.start()
             await context.load(session)
@@ -129,7 +130,7 @@ struct ConversationView: View {
                 // 放在滚动区外：它不该滚走，用户得先看见这个才明白为什么没有回答。
                 if let notice = model.interruptedNotice {
                     InterruptedBanner(text: notice) {
-                        withAnimation(.snappy(duration: 0.2)) { model.interruptedNotice = nil }
+                        withAnimation(.snappy(duration: 0.2)) { model.dismissInterruptedNotice() }
                     }
                 }
                 ScrollView {
