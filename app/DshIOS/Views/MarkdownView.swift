@@ -54,7 +54,17 @@ struct MarkdownView: View {
             }
         case .code(let language, let code):
             if language == "schemaJson", let node = GenUIView.parse(code) {
+                // 面板 + 一个「钉住」角标：用户可以主动把这块留着，而不只是自动钉最后一张。
                 GenUIView(node: node)
+                    .overlay(alignment: .topTrailing) {
+                        PinPanelButton(
+                            node: node,
+                            title: node["props"]["title"].string
+                                ?? node["children"].array.first?["props"]["title"].string
+                                ?? String(localized: "面板")
+                        )
+                        .padding(6)
+                    }
             } else {
                 CodeBlockView(language: language, code: code)
             }
