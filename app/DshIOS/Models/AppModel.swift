@@ -118,13 +118,17 @@ final class AppModel {
     /// a question that has already continued; plan review only ever arrives here).
     private(set) var questionRequests: [String: [QuestionRequest]] = [:]
     var lastError: String?
-    /// 被引擎重启打断的会话 → 提示文案。
-    /// 存这里而不是 SessionModel：通知到达时那个会话多半还没打开，
-    /// 模型实例还不存在；等用户点进去时再取。
-    private(set) var interrupted: [String: String] = [:]
+    struct InterruptedSession: Equatable {
+        let message: String
+        let turn: Int?
+    }
 
-    /// 取走某会话的中断提示（取一次就清，横幅关掉后不再出现）。
-    func takeInterrupted(_ id: String) -> String? {
+    /// 被引擎重启打断的会话 → 提示文案 + 被打断的 turn 编号。
+    /// 存这里而不是 SessionModel：通知到达时那个会话多半还没打开，模型实例还不存在。
+    private(set) var interrupted: [String: InterruptedSession] = [:]
+
+    /// 取走某会话的中断状态（横幅关闭后不再出现）。
+    func takeInterrupted(_ id: String) -> InterruptedSession? {
         interrupted.removeValue(forKey: id)
     }
 
@@ -184,6 +188,8 @@ final class AppModel {
     /// 自动守卫提醒的读取位置（已读到 notices.jsonl 的第几行）。
     /// 用行号而不是文件哈希：同一条提醒只弹一次，重启也不会重弹旧的。
     @ObservationIgnored private var noticeLine = 0
+    /// 已消费过的事件 id（引擎 outbox 按「至少一次」投递，重投靠它去重）。
+    @ObservationIgnored private var seenNoticeIds: Set<String> = []
     @ObservationIgnored private var noticeTask: Task<Void, Never>?
 
     init(launchURL: URL) {
@@ -241,6 +247,15 @@ final class AppModel {
                     baseline = max(0, lines.count - 1)
                 }
                 self?.noticeLine = baseline
+                // 基线里的历史事件也登记为已见：outbox 重投可能把同一条通知
+                // 再写一遍（行号变了但 eventId 没变），只有按 eventId 去重才挡得住。
+                for line in lines.prefix(baseline) {
+                    if let data = line.data(using: .utf8),
+                       let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                       let seen = obj["eventId"] as? String {
+                        self?.seenNoticeIds.insert(seen)
+                    }
+                }
             }
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
@@ -257,6 +272,19 @@ final class AppModel {
                 for line in lines[self.noticeLine...] {
                     guard let data = line.data(using: .utf8),
                           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
+                    // eventId 去重：引擎的 outbox 是「至少投递一次」，重投是预期行为。
+                    // 只靠行号会把同一条通知弹两遍；按 eventId 挡掉。
+                    // 没带 eventId 的旧格式通知仍按行号处理，兼容不丢。
+                    if let seen = obj["eventId"] as? String {
+                        if self.seenNoticeIds.contains(seen) { continue }
+                        self.seenNoticeIds.insert(seen)
+                        if self.seenNoticeIds.count > 1000 {
+                            // 集合无界会慢慢吃内存；1000 条已见足够挡住
+                            // 任何现实的重投窗口，超限就整组清掉（最坏结果：
+                            // 极老的通知重弹一次，可接受）。
+                            self.seenNoticeIds.removeAll()
+                        }
+                    }
                     // kind=preview：引擎做好了网页/图片，直接弹给用户看。
                     // 和普通提醒的区别是它不是一行字，而是一个要打开的文件。
                     if obj["kind"] as? String == "preview" {
@@ -282,8 +310,14 @@ final class AppModel {
                         let sessions = (obj["sessions"] as? [String]) ?? []
                         // 按会话记下来：用户点进去时那一条消息顶上会挂一条横幅，
                         // 告诉他「上一条任务在这儿断了」。只记一次，看过就清。
+                        let rawTurns = obj["turns"] as? [String: Any] ?? [:]
+                        let turns = rawTurns.compactMapValues { value -> Int? in
+                            guard let number = value as? NSNumber else { return nil }
+                            let turn = number.intValue
+                            return turn >= 0 ? turn : nil
+                        }
                         for id in sessions {
-                            self.interrupted[id] = message
+                            self.interrupted[id] = InterruptedSession(message: message, turn: turns[id])
                         }
                         let first = sessions.first
                         self.showToast(message, tone: .plain, actions: first.map { id in
