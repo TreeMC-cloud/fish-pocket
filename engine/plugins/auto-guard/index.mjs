@@ -159,6 +159,15 @@ function requireScheduleBridge() {
   return globalThis.__scheduleBridgeMod;
 }
 
+/** task-control：人工确认失败任务的入口（App 落文件、这里扫）。 */
+function requireTaskControl() {
+  if (!globalThis.__taskControlMod) {
+    const req = createRequire(import.meta.url);
+    globalThis.__taskControlMod = req('../../runtime/task-control.mjs');
+  }
+  return globalThis.__taskControlMod;
+}
+
 function requireSkillRegistry() {
   if (!globalThis.__skillRegMod) {
     const req = createRequire(import.meta.url);
@@ -371,6 +380,10 @@ ctx.effect(() => {
           );
         }
       } catch { /* schedule 不可用不影响调度 */ }
+
+      // 先处理人工确认请求（App 落的文件）：
+      // 用户点了「重排」，这一步把它变成 queued，紧接着的 tick 就会跑它。
+      try { requireTaskControl().drain(router, this.dataDir()); } catch { /* 控制面坏了不影响调度 */ }
 
       const result = await tick(router);
       if (result.started.length > 0) {
