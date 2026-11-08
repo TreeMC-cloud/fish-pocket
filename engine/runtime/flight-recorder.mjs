@@ -13,6 +13,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 
 /** 超过这个时间的中断记录不再提示：多半是几天前的事，弹出来只会让人困惑。 */
 export const STALE_MS = 24 * 60 * 60_000;
@@ -29,11 +30,16 @@ export function flightFile(dataDir) {
  * 升级就读不出来了。
  */
 function normalize(session, value) {
-  if (typeof value === 'number') return { session, at: value, step: '' };
+  if (typeof value === 'number') return { session, at: value, step: '', turn: null };
   if (!value || typeof value !== 'object') return null;
   const at = Number(value.at);
   if (!Number.isFinite(at)) return null;
-  return { session, at, step: typeof value.step === 'string' ? value.step : '' };
+  return {
+    session,
+    at,
+    step: typeof value.step === 'string' ? value.step : '',
+    turn: Number.isInteger(value.turn) ? value.turn : null,
+  };
 }
 
 /** 读残留记录。读不出来（首次启动、文件损坏）就当没有，不报错。 */
@@ -102,10 +108,23 @@ export function describeStep(toolName, summary) {
   return detail ? `${label}（${detail.slice(0, 40)}）` : label;
 }
 
-/** 重启后的处理：先把发现的中断项写进 notices.jsonl，再清空记录，免得重复提示。 */
-export function reportInterrupted(dataDir, { now = Date.now(), write = (line) => {
-  fs.appendFileSync(path.join(dataDir, 'notices.jsonl'), line, { mode: 0o600 });
-} } = {}) {
+/**
+ * 重启后的处理：把发现的中断项转成等待投递事件，**投递成功写入后**才清空记录。
+ *
+ * 为什么要改（原来的洞）：
+ *   旧实现直接 append notices.jsonl，写失败时 catch 掉然后照样清空 in-flight.json——
+ *   注释写的是「否则每次启动都提示」，但代价是**唯一的中断证据被永久丢弃**。
+ *   磁盘满、权限错、目录被清空时，用户永远不知道上一个任务断了。
+ *
+ * 现在的顺序：
+ *   1. 把中断事件写进 task registry 的 outbox（与任务表同一次原子写）
+ *   2. 只有第 1 步成功，才清空 in-flight.json
+ *   3. 投递由 auto-guard 每轮 flush，失败会留到下一轮重试
+ *
+ * 语义变化：从「尽力而为、失败就丢」变成「至少投递一次」。可能重复（若 ack 前又崩溃），
+ * 但重复提醒远好于静默丢失；App 侧按 eventId 去重。
+ */
+export function reportInterrupted(dataDir, { now = Date.now(), write = null } = {}) {
   const interrupted = interruptedSince(dataDir, now);
   if (interrupted.length === 0) {
     writeInFlight(dataDir, {});
@@ -118,15 +137,58 @@ export function reportInterrupted(dataDir, { now = Date.now(), write = (line) =>
   const message = interrupted.length === 1
     ? `被引擎重启中断${step}。先看看已经改了什么，再决定要不要重新发一次。`
     : `${interrupted.length} 个任务被引擎重启中断。先看看各自改了什么，再决定要不要重新发。`;
+  const event = {
+    kind: 'interrupted',
+    message,
+    sessions: interrupted.map((item) => item.session),
+    steps: Object.fromEntries(interrupted.map((item) => [item.session, item.step])),
+    turns: Object.fromEntries(interrupted.map((item) => [item.session, item.turn])),
+    time: now,
+  };
+
+  // 测试可以注入 write 来模拟「写不进去」；生产走 outbox。
+  let recorded = false;
   try {
-    write(JSON.stringify({
-      kind: 'interrupted',
-      message,
-      sessions: interrupted.map((item) => item.session),
-      steps: Object.fromEntries(interrupted.map((item) => [item.session, item.step])),
-      time: now,
-    }) + '\n');
-  } catch { /* 写不进通知文件也要把记录清掉，否则每次启动都提示 */ }
-  writeInFlight(dataDir, {});
+    if (typeof write === 'function') {
+      write(JSON.stringify(event) + '\n');
+      recorded = true;
+    } else {
+      // 延迟 import：flight-recorder 被 task-registry 之外的地方引用时不强依赖它。
+      const { load, save, enqueue } = requireTaskRegistry();
+      const state = load(dataDir);
+      enqueue(state, {
+        kind: 'interrupted',
+        message,
+        taskId: null,
+        detail: {
+          kind: 'interrupted',
+          sessions: event.sessions,
+          steps: event.steps,
+          turns: event.turns,
+        },
+      }, now);
+      save(state, dataDir);
+      recorded = true;
+    }
+  } catch { recorded = false; }
+
+  // 关键：写失败就不清空。留下记录，下次启动还能再试一次。
+  if (recorded) writeInFlight(dataDir, {});
   return interrupted;
 }
+
+/**
+ * 同步拿到 task-registry 的导出。
+ *
+ * 为什么按需加载而不是顶层 import：flight-recorder 是更底层的模块，task-registry
+ * 又用同一个数据目录；顶层互相 import 在 ESM 里可能拿到半初始化的命名空间。
+ * 按需同步加载最稳，两个模块本身都只依赖文件系统，不存在真正的环。
+ */
+function requireTaskRegistry() {
+  if (!globalThis.__taskRegistry) {
+    const req = createRequire(import.meta.url);
+    globalThis.__taskRegistry = req('./task-registry.mjs');
+  }
+  return globalThis.__taskRegistry;
+}
+
