@@ -1,6 +1,10 @@
 ---
 name: handoff
 description: 会话随时会被杀，进度必须落文件。多步骤任务开头先读交接，收工或换会话前必须写。
+version: 1.0.0
+source: handwritten
+permissions: [writes-files]
+
 ---
 
 # 交接 —— 记忆在文件里，不在会话里
