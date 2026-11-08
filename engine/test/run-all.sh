@@ -43,8 +43,12 @@ for f in test/*.test.mjs; do
 
   # 超时由 Node 管：单个测试文件 120 秒没结束就算失败。
   # 不用 shell 的 timeout（macOS 没有）。
-  out=$(node --test-timeout=120000 "$f" 2>&1)
-  rc=$?
+  #
+  # rc 必须先初始化：`set -u` 下任何未定义变量都会让脚本直接退出，
+  # 而 `out=$(...)` 在某些 shell 里的赋值时序不保证——CI 上就是
+  # `line 61: rc: unbound variable`，整个测试步骤一行断言都没跑完就红了。
+  rc=0
+  out=$(node --test-timeout=120000 "$f" 2>&1) || rc=$?
 
   # 原生模块缺失：明确跳过，不算失败
   if echo "$out" | grep -q "ERR_MODULE_NOT_FOUND\|Cannot find module\|Cannot find package"; then
@@ -55,10 +59,12 @@ for f in test/*.test.mjs; do
   p=$(echo "$out" | grep -E "^# pass" | awk '{print $3}')
   fl=$(echo "$out" | grep -E "^# fail" | awk '{print $3}')
   if [ -z "$p" ]; then
-    # 没有 TAP 汇总行：把前几行打出来，否则"C 为什么失败"要靠猜
-    failed="$failed $name(no-output,rc=$rc)"
+    # 没有 TAP 汇总行：把前几行打出来，否则"为什么失败"要靠猜。
+    # 注意 rc 可能在部分 shell 下没被赋值（set -u 会直接退出），
+    # 所以用默认值兜住：${rc:-?}
+    failed="$failed $name(no-output,rc=${rc:-?})"
     fail=$((fail + 1))
-    echo "  !! $name 没有输出汇总（退出码 $rc），前几行："
+    echo "  !! $name 没有输出汇总（退出码 ${rc:-?}），前几行："
     echo "$out" | head -3 | sed 's/^/     /'
     continue
   fi
