@@ -323,6 +323,27 @@ struct TurnFailure {
 
     var isQuota: Bool { code == "QUOTA" || code == "ACCOUNT_QUOTA" }
 
+    /// 这次失败换一个模型（另一个 provider／另一条上游）就可能成功。
+    ///
+    /// 码表取自宿主 `dsh-llm` 的 `DEFAULT_RETRYABLE_CODES`（EMPTY_RESPONSE /
+    /// RATE_LIMIT / SERVER / TIMEOUT / TRANSPORT）—— 同一 provider 内重试 5 次
+    /// 后仍失败，说明这条线路本身不通，换线路才有意义；再加额度类与凭据类，
+    /// 那几种同样是「这个模型用不了」而不是「这个任务做不了」。
+    ///
+    /// 刻意排除 `CONTEXT_WINDOW_EXCEEDED`：要压的是历史长度，换模型只是把问题
+    /// 藏起来（换到窗口更大的模型，下一轮照样撞墙，而用户不知道该压缩）。
+    var isModelUnreachable: Bool {
+        switch code {
+        case "RATE_LIMIT", "SERVER", "TIMEOUT", "TRANSPORT", "EMPTY_RESPONSE",
+             "QUOTA", "ACCOUNT_QUOTA",
+             "MISSING_CREDENTIAL", "INVALID_CREDENTIAL", "AUTH", "ACCOUNT_SIGN_IN_REQUIRED",
+             "NO_ADAPTER":
+            true
+        default:
+            false
+        }
+    }
+
     /// The turn never reached a model for want of a working credential.
     enum CredentialProblem: Hashable { case missing, invalid }
 
