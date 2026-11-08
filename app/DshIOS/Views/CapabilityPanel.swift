@@ -7,10 +7,22 @@ import SwiftUI
 /// 这份快照只做投影——引擎写，界面读，两边都不改业务数据。
 struct CapabilityStatus: Decodable, Equatable {
     struct TaskStats: Decodable, Equatable {
+        /// 卡在「等人工确认」的任务。
+        /// 状态机故意不让失败任务自动重跑，但只给个数字等于把问题藏起来——
+        /// 用户得看到是哪个任务、为什么失败，才能决定要不要重排。
+        struct Attention: Decodable, Equatable, Identifiable {
+            var taskId: String?
+            var title: String = ""
+            var error: String = ""
+            var deferCount: Int = 0
+            var updatedAt: Double = 0
+            var id: String { taskId ?? "\(title)-\(updatedAt)" }
+        }
         var ok: Bool = false
         var reason: String?
         var total: Int = 0
         var byStatus: [String: Int] = [:]
+        var needsAttention: [Attention] = []
     }
 
     struct Dream: Decodable, Equatable {
@@ -115,6 +127,8 @@ struct CapabilityStatus: Decodable, Equatable {
 /// 3. **只显示有意义的**：一堆 0 的格子不如不显示。
 struct CapabilityPanel: View {
     let status: CapabilityStatus?
+    /// 「重排」按钮要写控制请求文件，所以需要 AppModel。
+    @Environment(AppModel.self) private var app
     /// 放进已有卡片的容器（设置页的 Form 行）时不画自己的底和描边，
     /// 否则玻璃行里再套一层实心卡，边看不出来但底色会压暗一层。
     var bare = false
@@ -134,6 +148,7 @@ struct CapabilityPanel: View {
             if hasAnyData {
                 if !s.interrupts.running.isEmpty { runningSection }
                 if s.schedules.total > 0 { schedulesSection }
+                if !s.taskStats.needsAttention.isEmpty { attentionSection }
                 if !s.alerts.isEmpty { alertsSection }
                 metricsGrid
                 if let lastRun = lastRunText { footer(lastRun) }
@@ -184,6 +199,42 @@ struct CapabilityPanel: View {
                         .font(.caption)
                         .foregroundStyle(Palette.secondary)
                         .lineLimit(1)
+                }
+            }
+        }
+    }
+
+    // MARK: - 待确认任务
+
+    /// 失败任务不会自动重跑（有副作用的操作重来可能更糟），
+    /// 所以它们的出路只有「人来点一下」。这一段就是那个入口。
+    private var attentionSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionLabel("等你确认")
+            ForEach(s.taskStats.needsAttention.prefix(3)) { task in
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Circle().fill(Palette.removed).frame(width: 6, height: 6)
+                        Text(task.title.isEmpty ? "（未命名任务）" : task.title)
+                            .font(.caption)
+                            .foregroundStyle(Palette.ink)
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                        Button("重排") {
+                            guard let id = task.taskId else { return }
+                            Haptics.tap()
+                            app.controlTask("requeue", taskId: id)
+                        }
+                        .font(.caption.weight(.medium))
+                        .buttonStyle(.bordered)
+                        .controlSize(.mini)
+                    }
+                    if !task.error.isEmpty {
+                        Text(task.error)
+                            .font(.caption2)
+                            .foregroundStyle(Palette.faint)
+                            .lineLimit(2)
+                    }
                 }
             }
         }
