@@ -854,7 +854,7 @@ private struct InterruptedBanner: View {
                 .font(.footnote)
                 .foregroundStyle(Palette.waiting)
             VStack(alignment: .leading, spacing: 2) {
-                Text("上次的任务被打断了")
+                Text("任务被打断了")
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(Palette.ink)
                 Text(text)
