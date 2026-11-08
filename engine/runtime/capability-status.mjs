@@ -148,8 +148,9 @@ export function buildStatus(dataDir, { now = Date.now(), traceLimit = 200 } = {}
   return {
     version: 1,
     generatedAt: now,
-    // 一句话总结：面板顶部直接显示，不用用户自己拼
-    headline: headlineOf({ taskStats, dream, skills, interrupts, alerts }),
+    // 一句话总结：面板顶部直接显示，不用用户自己拼。
+    // trace / turns 必须传进来：它们才是每轮真的在写的数据源。
+    headline: headlineOf({ taskStats, dream, skills, interrupts, alerts, trace, turns }),
     taskStats,
     dream,
     skills,
@@ -161,10 +162,22 @@ export function buildStatus(dataDir, { now = Date.now(), traceLimit = 200 } = {}
 }
 
 /** 生成一句人话总结。空状态时说清楚"还没开始"，不说"一切正常"。 */
-function headlineOf({ taskStats, dream, skills, interrupts, alerts }) {
+function headlineOf({ taskStats, dream, skills, interrupts, alerts, trace, turns }) {
   const parts = [];
   if (interrupts.running.length > 0) parts.push(`${interrupts.running.length} 个任务在跑`);
   if (taskStats.ok && taskStats.total > 0) parts.push(`${taskStats.total} 个任务记录`);
+  // trace 是**唯一真正每轮都在写**的数据源（auto-guard 在 turn/end 记账）。
+  // 原来的 headline 只看 tasks/dream/skills —— 那三张表分别依赖 Router、定时整理
+  // 和技能记账，在当前版本都没有接进运行路径，所以无论跑了多少轮对话都显示
+  // 「还没开始干活」。真实情况是「早就在干活了，只是没被算进来」。
+  if (trace && trace.ok && trace.total > 0) {
+    parts.push(`记录 ${trace.total} 轮`);
+    if (trace.successes > 0) parts.push(`成功 ${trace.successes}`);
+    if (trace.failures > 0) parts.push(`失败 ${trace.failures}`);
+  } else if (turns && turns.ok && turns.total > 0) {
+    // trace 还没攒起来时，至少有轮次计数可以说明"在干活"。
+    parts.push(`跑了 ${turns.total} 轮`);
+  }
   if (dream.ok && dream.runs > 0) parts.push(`整理过 ${dream.runs} 次`);
   if (skills.ok && skills.tracked > 0) parts.push(`用过 ${skills.tracked} 个技能`);
   if (alerts.length > 0) parts.push(`${alerts.length} 条告警`);
