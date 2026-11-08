@@ -357,8 +357,15 @@ final class SessionModel {
     /// Send a message; while a turn runs it is queued (or steers it when `steer`).
     /// Failures land in `error`; the composer sends through `prompt` instead.
     func send(text: String, images: [(mediaType: String, data: String, name: String)] = [], steer: Bool = false) async {
+        // 快捷胶囊选了场景模板时，把提示拼在正文后面而不是塞进用户的原话里：
+        // 用户看到的仍是他自己写的那句，AI 额外收到一条「照这个场景的面板组织」。
+        var outgoing = text
+        if let scene = app.pendingSceneHint, !text.isEmpty {
+            outgoing += "\n\n（按当前场景的 " + scene + " 模板组织面板，见 skills/scene/panel.mjs）"
+            app.pendingSceneHint = nil
+        }
         var content: [JSON] = images.map { ["type": "image", "mediaType": .string($0.mediaType), "data": .string($0.data), "name": .string($0.name)] }
-        if !text.isEmpty { content.append(["type": "text", "text": .string(text)]) }
+        if !outgoing.isEmpty { content.append(["type": "text", "text": .string(outgoing)]) }
         guard !content.isEmpty else { return }
         do {
             try await prompt(content: content, steer: steer, requestId: UUID().uuidString.lowercased())
