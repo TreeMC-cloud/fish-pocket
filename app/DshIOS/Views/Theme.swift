@@ -181,7 +181,13 @@ struct GroupedListStyle: ViewModifier {
             .background(Palette.background)
             // 分组之间要拉开距离：一叠玻璃卡挨太近会糊成一片，
             // 看不出「这是三个不同的分区」。14pt 让每叠卡自成一块。
-            .listSectionSpacing(14)
+            .listSectionSpacing(18)
+            // 行高兜底：insetGrouped 的行默认 44pt，而这套卡片圆角 22pt、
+            // 上下还有 14pt insets，44pt 的行里字被挤到贴边。
+            // 52pt 是「圆角 22 + 上下各 8pt 呼吸」的下限。
+            // 放在这里而不是每行：139 处调用只有 7 处显式设过 insets，
+            // 逐行补漏一定漏；样式统一在 List 层才能一次覆盖。
+            .environment(\.defaultMinListRowHeight, 52)
     }
 }
 
