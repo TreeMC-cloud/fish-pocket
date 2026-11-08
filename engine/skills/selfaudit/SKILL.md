@@ -1,6 +1,10 @@
 ---
 name: selfaudit
 description: 定期体检自己的配置和能力有没有失效。怀疑某个功能没生效时跑一遍。
+version: 1.0.0
+source: handwritten
+permissions: [read-only]
+
 ---
 
 # 规矩体检
