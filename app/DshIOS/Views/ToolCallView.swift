@@ -133,6 +133,13 @@ enum ToolStyle {
         "session_event_read": "读取事件", "session_event_search": "搜索事件", "session_event_trace": "追踪事件",
         "session_search": "搜索会话", "session_trace": "追踪会话",
         "terminal_open": "创建终端", "terminal_read": "读取终端", "terminal_list": "查看终端", "terminal_signal": "发送终端信号", "terminal_close": "关闭终端",
+        // 漏掉的几个内置工具：没有条目时会退回英文工具名（apply_patch、create…），
+        // 用户看到的是代码而不是「这个动作在做什么」。
+        "create": "新建文件", "apply_patch": "应用补丁",
+        "terminal_send": "向终端输入", "schedule_edit": "修改定时任务", "schedule_view": "查看定时任务",
+        "load_workspace_dependencies": "准备依赖",
+        "cordis_inspect_list": "查看插件", "cordis_inspect_query": "查询插件",
+        "mcp_client": "连接外部工具", "web": "查询网页",
     ]
 
     static func title(for call: ToolCall) -> String { titles[call.displayName] ?? String(localized: "工具调用") }
