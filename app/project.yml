@@ -59,10 +59,14 @@ targets:
         CFBundleDevelopmentRegion: zh-Hans
         CFBundleLocalizations: [zh-Hans, en]
         # Launch: the page colour and the mark, which the engine start-up screen keeps in place.
+        # 系统启动屏只留背景色，**故意不放图**。
+        # 原因：只含 UIImageName 的那一屏是 iOS 画的、比 App 早出现，
+        # 而它的内容会被系统快照缓存（SplashBoard）留到下一次启动——
+        # 换图、甚至删 App 重装都可能看到上一版图形残留 1 秒。
+        # 去掉图之后系统那屏只是一块背景色，App 一起来 StartupView 立刻画 Σ，
+        # 界面上不再存在「显示旧图」的入口。
         UILaunchScreen:
           UIColorName: Background
-          UIImageName: LaunchMark
-          UIImageRespectsSafeAreaInsets: false
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         # iPad: several windows, each on its own conversation (one engine connection).
