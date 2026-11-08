@@ -140,7 +140,7 @@ final class BackgroundKeeper {
             MainActor.assumeIsolated { self.run(task) }
         }
         guard registered else { return }
-        let request = BGContinuedProcessingTaskRequest(identifier: identifier, title: String(localized: "DSH 任务进行中"), subtitle: subtitle)
+        let request = BGContinuedProcessingTaskRequest(identifier: identifier, title: String(localized: "Sigma 任务进行中"), subtitle: subtitle)
         request.strategy = .fail
         do {
             try BGTaskScheduler.shared.submit(request)
@@ -178,7 +178,7 @@ final class BackgroundKeeper {
         guard #available(iOS 26.0, *), let task = continued as? BGContinuedProcessingTask else { return }
         task.progress.completedUnitCount += 1
         task.progress.totalUnitCount = task.progress.completedUnitCount + 10
-        task.updateTitle(String(localized: "DSH 任务进行中"), subtitle: subtitle)
+        task.updateTitle(String(localized: "Sigma 任务进行中"), subtitle: subtitle)
     }
 
     private func finishContinued() {
