@@ -99,7 +99,9 @@ export function distill(traces, { minHits = 3, minSuccessRate = 0.6, maxText = 6
       for (const t of m.tags) freq.set(t, (freq.get(t) || 0) + 1);
     }
     const tags = [...freq.entries()].sort((a, b) => b[1] - a[1]).map(([t]) => t).slice(0, 12);
-    const key = [...tags].sort().join('+');
+    // key 用排序后的顺序（稳定标识），显示用原始频次顺序（可读）
+    const sortedTags = [...tags].sort();
+    const key = sortedTags.join('+');
 
     // 取最强的那条成功样本当"典型做法"（这里用最近的一条，简单且可解释）
     const best = okItems[okItems.length - 1];
