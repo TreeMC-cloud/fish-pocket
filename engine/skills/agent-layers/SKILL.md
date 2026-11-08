@@ -1,6 +1,10 @@
 ---
 name: agent-layers
 description: 多 agent 系统里判断这件事该放哪一层（决策/执行/验收/档案）。改了这坏那、两个模块互相甩锅时用。
+version: 1.0.0
+source: handwritten
+permissions: [read-only]
+
 ---
 
 # 四层与三条不变量
