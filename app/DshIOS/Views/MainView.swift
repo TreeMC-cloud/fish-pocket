@@ -32,6 +32,10 @@ struct MainView: View {
     @State private var keyEditorRef: String?
     /// 登录面板里选了「使用第三方 API」：等那张表关掉再开接入页，避免叠弹窗。
     @State private var pendingThirdParty = false
+    /// 首次引导里选了「第三方 API」：同上，等引导 sheet 关掉再开接入页。
+    @State private var pendingOfficialKey = false
+    /// 首次引导里选了「登录 DeepSeek 账号」：等引导 sheet 关掉再开登录页。
+    @State private var pendingSignIn = false
     /// The ask for a Star or a share.
     @State private var supportDialog = false
 
@@ -44,10 +48,13 @@ struct MainView: View {
     /// themselves at launch: the interface comes first, and a message sent with nothing to answer
     /// it asks for them (`SessionModel`), as do the sign-in buttons.
     enum Onboarding: Identifiable {
+        /// 首次引导：先问「你手上是哪种 key」，而不是一上来就登录。
+        case start
         case signIn(ref: String, autoStart: Bool = false)
         case key(ref: String)
         var id: String {
             switch self {
+            case .start: "start"
             case .signIn: "sign-in"
             case .key: "key"
             }
@@ -166,6 +173,13 @@ struct MainView: View {
         }
         .sheet(item: $onboarding, onDismiss: onboardingDismissed) { step in
             switch step {
+            case .start:
+                OnboardingStartSheet(
+                    signIn: { onboarding = nil; pendingSignIn = true },
+                    thirdParty: { onboarding = nil; pendingThirdParty = true },
+                    officialKey: { onboarding = nil; pendingOfficialKey = true },
+                    later: { onboarding = nil }
+                )
             case .signIn(let ref, let autoStart):
                 SignInSheet(
                     autoStart: autoStart,
@@ -214,13 +228,22 @@ struct MainView: View {
     private func openCredentials(_ step: AppModel.CredentialStep) async {
         sheet = nil
         if case .settings = step { sheet = .settings; return }
+        // 首次引导不走「先登录」：它自己会问「你手上是哪种 key」，
+        // 官方 Key 与第三方 API 两条路都在那张表里，不需要事先拿到 ref。
+        if case .start = step {
+            guard await app.officialKeyRef() != nil else { sheet = .signIn; return }
+            onboarding = .start
+            return
+        }
         guard let ref = await app.officialKeyRef() else {
             if case .officialKey = step { sheet = .settings } else { sheet = .signIn }
             return
         }
         switch step {
-        case .start, .signIn:
-            if case .signIn = step { onboarding = .signIn(ref: ref, autoStart: true) } else { onboarding = .signIn(ref: ref) }
+        case .start:
+            break
+        case .signIn:
+            onboarding = .signIn(ref: ref, autoStart: true)
         case .officialKey:
             onboarding = .key(ref: ref)
         case .settings:
@@ -230,14 +253,36 @@ struct MainView: View {
 
     /// 「添加 API Key」 in the sign-in sheet hands over to the key editor once that sheet is gone.
     private func onboardingDismissed() {
+        // 首次引导里做的选择：等那张表关掉再开下一张。
+        // 同一个 runloop 里换 sheet，宿主视图已被拆掉，下一张可能根本不出现，
+        // 所以统一等一个短延时（和下面 pendingThirdParty 的老逻辑一致）。
+        if pendingSignIn {
+            pendingSignIn = false
+            Task {
+                try? await Task.sleep(for: .milliseconds(350))
+                sheet = .signIn
+            }
+            return
+        }
         if pendingThirdParty {
             pendingThirdParty = false
             keyEditorRef = nil
-            // 让关闭动画先走完，再挂下一张表：同一个 runloop 里换 sheet，
-            // 宿主视图已被拆掉，那张表可能根本不出现。
             Task {
                 try? await Task.sleep(for: .milliseconds(350))
                 sheet = .thirdParty
+            }
+            return
+        }
+        if pendingOfficialKey {
+            pendingOfficialKey = false
+            // 官方 Key 表要知道写进哪个 ref；拿不到就退回设置页，那里也能填。
+            Task {
+                try? await Task.sleep(for: .milliseconds(350))
+                if let ref = await app.officialKeyRef() {
+                    onboarding = .key(ref: ref)
+                } else {
+                    sheet = .settings
+                }
             }
             return
         }
