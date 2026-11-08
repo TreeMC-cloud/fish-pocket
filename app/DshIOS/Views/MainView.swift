@@ -230,8 +230,9 @@ struct MainView: View {
         if case .settings = step { sheet = .settings; return }
         // 首次引导不走「先登录」：它自己会问「你手上是哪种 key」，
         // 官方 Key 与第三方 API 两条路都在那张表里，不需要事先拿到 ref。
+        // 注意：官方路由拿不到 ref 时（比如只配了第三方）也必须弹引导页——
+        // 那正是最需要「第三方 API」这个选项的人，退回登录页等于把他挡在门外。
         if case .start = step {
-            guard await app.officialKeyRef() != nil else { sheet = .signIn; return }
             onboarding = .start
             return
         }
