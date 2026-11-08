@@ -42,7 +42,9 @@ final class NodeEngine: ObservableObject {
         guard !started else { return }
         started = true
         startedAt = Date()
+        Diagnostics.shared.record("引擎启动")
         guard EnginePaths.install() else {
+            Diagnostics.shared.record("引擎安装失败", "EnginePaths.install() 返回 false")
             phase = .exited(-1)
             return
         }
@@ -59,7 +61,10 @@ final class NodeEngine: ObservableObject {
 
         let thread = Thread {
             let code = NodeEngine.runNode(["node", "--expose-internals", EnginePaths.script])
-            Task { @MainActor in NodeEngine.shared.phase = .exited(code) }
+            Task { @MainActor in
+                Diagnostics.shared.record("引擎退出", "退出码 \(code)")
+                NodeEngine.shared.phase = .exited(code)
+            }
         }
         thread.name = "node"
         // V8 derives its stack limit from the thread; DSH's module graph is deep.
@@ -84,6 +89,7 @@ final class NodeEngine: ObservableObject {
                 phase = .running(url, generation: generation)
                 runningSince = Date()
                 stalled = false
+                Diagnostics.shared.record("引擎就绪", "第 \(generation) 次 · \(url.absoluteString)")
             }
             if case .starting = phase, let startedAt, Date().timeIntervalSince(startedAt) > Self.stallAfter {
                 stalled = true
