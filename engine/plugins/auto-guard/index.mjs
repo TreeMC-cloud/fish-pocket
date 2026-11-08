@@ -132,6 +132,24 @@ function requireTaskTracking() {
   return globalThis.__taskTrackMod;
 }
 
+/** Router：准入、并发、租约、失败改道。运行时唯一的调度器。 */
+function requireRouter() {
+  if (!globalThis.__routerMod) {
+    const req = createRequire(import.meta.url);
+    globalThis.__routerMod = req('../../runtime/router.mjs');
+  }
+  return globalThis.__routerMod;
+}
+
+/** task-runner：把排队任务真的投进 DSH 会话。 */
+function requireTaskRunner() {
+  if (!globalThis.__taskRunnerMod) {
+    const req = createRequire(import.meta.url);
+    globalThis.__taskRunnerMod = req('../../runtime/task-runner.mjs');
+  }
+  return globalThis.__taskRunnerMod;
+}
+
 function requireSkillRegistry() {
   if (!globalThis.__skillRegMod) {
     const req = createRequire(import.meta.url);
@@ -258,6 +276,88 @@ export default class AutoGuard {
     // 写在文件里但从没被读取验证过——等于没有约束。
     // 只写日志不阻断：某个技能元数据缺字段是维护问题，不该让 App 起不来。
     this.auditSkillsOnce();
+
+
+// ══════════════════════════════════════════════════════════════════
+// Router 调度循环：让队列里的「无主任务」真的被执行
+//
+// 在此之前 Router 和 Task Registry 只有测试在调，运行时从不触发——
+// 任务表永远是空的，能力地图只能显示「还没开始干活」。
+//
+// 边界（iOS 现实，必须写清楚）：
+//   这个循环只在**引擎进程活着**时跑。App 被杀后定时器一起消失，
+//   到点该做的事不会发生。所以它是「存活期间的可靠执行队列」，
+//   不是「常驻调度器」——后者在 iOS 上做不到，别对外宣称。
+//
+// 为什么用 ctx.get('agents') 而不是 inject：
+//   inject 声明的是**硬依赖**，服务不存在时整个插件不激活。
+//   如果哪天 DSH 改了服务名，注入会让守卫（cron/轮次/注入检测）一起失效——
+//   为了一个附加能力赔上整个安全层，不划算。
+//   ctx.get 是不带 inject 要求的读取，拿不到就跳过，主功能不受影响。
+// ══════════════════════════════════════════════════════════════════
+ctx.effect(() => {
+  let timer = null;
+  let stopped = false;
+  let running = false;
+
+  const INTERVAL_MS = 15_000;
+
+  const schedule = () => {
+    if (stopped) return;
+    timer = setTimeout(runOnce, INTERVAL_MS);
+    // iOS 上 setTimeout 不该拖住进程退出
+    try { timer?.unref?.(); } catch { /* 某些宿主没有 unref */ }
+  };
+
+  const runOnce = async () => {
+    if (stopped || running) { schedule(); return; }
+    running = true;
+    try {
+      const { Router } = requireRouter();
+      const { makeRunTask, tick } = requireTaskRunner();
+      const agents = ctx.get?.('agents');
+      if (!agents) {
+        // 宿主没提供 agents：这个版本不支持投递，静默跳过。
+        // 不写日志刷屏——每 15 秒一条会把 engine.log 淹掉。
+        return;
+      }
+      const router = new Router({
+        dataDir: this.dataDir(),
+        runTask: makeRunTask({
+          ctx,
+          // dsh-llm 的 createUserMessage 由宿主注入的消息构造器代替：
+          // 拿不到就退化成普通对象（inject 只要求有 content/source 形状）。
+          createUserMessage: (input) => input,
+          logger: this.ctx.logger,
+        }),
+      });
+      const result = await tick(router);
+      if (result.started.length > 0) {
+        try {
+          this.ctx.logger?.info?.(
+            `[auto-guard] 调度启动了 ${result.started.length} 个任务: ${result.started.join(',')}`,
+          );
+        } catch { /* 无 logger */ }
+      }
+      // 有任务被 sweep 掉或跑起来了，立刻刷新能力快照，别等下一轮对话
+      if (result.swept.length || result.started.length) {
+        try { requireCapabilityStatus().writeStatus(this.dataDir()); } catch { /* 面板读不到不影响对话 */ }
+      }
+    } catch (error) {
+      try { this.ctx.logger?.warn?.('[auto-guard] 调度循环异常: %s', error?.message ?? error); } catch { /* 无 logger */ }
+    } finally {
+      running = false;
+      schedule();
+    }
+  };
+
+  schedule();
+
+  return () => {
+    stopped = true;
+    if (timer) clearTimeout(timer);
+  };
+});
 
     ctx.effect(() => {
       const offs = [
