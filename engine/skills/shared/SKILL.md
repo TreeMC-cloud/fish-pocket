@@ -1,6 +1,10 @@
 ---
 name: shared
 description: 跨项目共享的约定和资料放哪。要复用别的项目的东西、或者要写公共内容时用。
+version: 1.0.0
+source: handwritten
+permissions: [writes-files]
+
 ---
 
 # 共享层 —— 四块板，各回答一个问题
