@@ -149,24 +149,16 @@ struct ConversationView: View {
             .onChange(of: model.running) { _, running in if running, atBottom { scrollToBottom(proxy) } }
             .overlay(alignment: .bottomTrailing) {
                 // Animated here, not on the scroll view: its rows must not animate with the buttons.
-                ZStack {
-                    if !atBottom && !blank {
-                        VStack(spacing: 8) {
-                            // The web's turn rail needs a wide window; here it is a list one tap away.
-                            if model.turnOutline.count >= 2 {
-                                FloatingIcon(systemName: "list.bullet", label: "跳转到轮次") { showTurns = true }
-                            }
-                            FloatingIcon(systemName: "chevron.down", label: "回到底部") {
-                                atBottom = true
-                                scrollToBottom(proxy)
-                            }
-                        }
-                        .padding(.trailing, 16)
-                        .padding(.bottom, 12)
-                        .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                // 拆成独立子视图：原来内联的 VStack + 条件分支会让类型推断超时（CI 实测）。
+                BottomFloaters(
+                    show: !atBottom && !blank,
+                    showTurns: model.turnOutline.count >= 2,
+                    jumpTurns: { showTurns = true },
+                    backToBottom: {
+                        atBottom = true
+                        scrollToBottom(proxy)
                     }
-                }
-                .animation(.snappy(duration: 0.18), value: atBottom)
+                )
             }
             .sheet(isPresented: $showTurns) {
                 TurnJumpSheet(outline: model.turnOutline) { entry in
@@ -824,6 +816,35 @@ private struct TimelineRow: View, Equatable {
         case .retry(let retry):
             RetryNotice(retry: retry)
         }
+    }
+}
+
+/// 时间线右下角的浮动按钮组（回到底部 / 跳转到轮次）。
+///
+/// 独立成一个 View 是为了让 `body` 里的类型推断有个明确的边界：
+/// 内联的 `ZStack { if … VStack { if … } }` + 两个闭包，CI 上直接判定超时。
+private struct BottomFloaters: View {
+    let show: Bool
+    let showTurns: Bool
+    let jumpTurns: () -> Void
+    let backToBottom: () -> Void
+
+    var body: some View {
+        ZStack {
+            if show {
+                VStack(spacing: 8) {
+                    // The web's turn rail needs a wide window; here it is a list one tap away.
+                    if showTurns {
+                        FloatingIcon(systemName: "list.bullet", label: "跳转到轮次", action: jumpTurns)
+                    }
+                    FloatingIcon(systemName: "chevron.down", label: "回到底部", action: backToBottom)
+                }
+                .padding(.trailing, 16)
+                .padding(.bottom, 12)
+                .transition(.opacity.combined(with: .scale(scale: 0.8)))
+            }
+        }
+        .animation(.snappy(duration: 0.18), value: show)
     }
 }
 
