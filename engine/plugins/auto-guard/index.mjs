@@ -109,6 +109,22 @@ function sessionId(session) {
  * 而 memory-store 又去 require meow-memory（一个大包）。顶层加载会让
  * 插件启动变慢，而 Dream 十分钟才可能跑一次——不值得为它付启动成本。
  */
+function requireCapabilityStatus() {
+  if (!globalThis.__capStatusMod) {
+    const req = createRequire(import.meta.url);
+    globalThis.__capStatusMod = req('../../runtime/capability-status.mjs');
+  }
+  return globalThis.__capStatusMod;
+}
+
+function requireSkillRegistry() {
+  if (!globalThis.__skillRegMod) {
+    const req = createRequire(import.meta.url);
+    globalThis.__skillRegMod = req('../../runtime/skill-registry.mjs');
+  }
+  return globalThis.__skillRegMod;
+}
+
 function requireSafeEdit() {
   if (!globalThis.__safeEditMod) {
     const req = createRequire(import.meta.url);
@@ -222,6 +238,11 @@ export default class AutoGuard {
     this.inFlight = new Map();
     /** 上次查「未回执派单」的时间，避免每轮重复 spawn sentinel。 */
     this.lastDispatchCheck = 0;
+
+    // 启动时校验一次技能元数据。18 个技能的 version/source/permissions
+    // 写在文件里但从没被读取验证过——等于没有约束。
+    // 只写日志不阻断：某个技能元数据缺字段是维护问题，不该让 App 起不来。
+    this.auditSkillsOnce();
 
     ctx.effect(() => {
       const offs = [
@@ -466,6 +487,35 @@ export default class AutoGuard {
   ledgerFile() {
     return process.env.DSH_SENTINEL_LEDGER
       || path.join(process.env.DSH_IOS_DATA || process.cwd(), '.sentinel.jsonl');
+  }
+
+  /**
+   * 启动时体检技能元数据。结果写进引擎日志，不弹 toast。
+   *
+   * 为什么不弹：技能缺个 version 不是用户该操心的事，弹出来只会让人以为出错了。
+   * 但必须留痕迹——否则「18 个技能都有版本和权限」这句话永远没人验证过。
+   */
+  auditSkillsOnce() {
+    try {
+      const { auditSkills } = requireSkillRegistry();
+      // 技能目录与 main.mjs 的 DSH_BUNDLED_SKILL_DIR 同一口径
+      const dir = process.env.DSH_BUNDLED_SKILL_DIR
+        || path.join(path.dirname(fileURLToPath(import.meta.url)), '../../skills');
+      const r = auditSkills(dir);
+      if (!r.skills?.length) return;
+      const bad = r.skills.filter((s) => !s.ok);
+      const warn = r.skills.filter((s) => s.ok && s.warnings?.length);
+      if (bad.length === 0 && warn.length === 0) {
+        this.ctx.logger?.info?.(`[auto-guard] 技能体检通过：${r.skills.length} 个`);
+        return;
+      }
+      for (const s of bad) {
+        this.ctx.logger?.warn?.(`[auto-guard] 技能 ${s.name} 不合格：${s.errors.join('；')}`);
+      }
+      for (const s of warn.slice(0, 5)) {
+        this.ctx.logger?.warn?.(`[auto-guard] 技能 ${s.name} 有警告：${s.warnings.join('；')}`);
+      }
+    } catch { /* 体检失败不影响启动 */ }
   }
 
   /**
@@ -714,6 +764,8 @@ export default class AutoGuard {
       });
 
       s.traceWritten = true;
+      // 每轮结束刷新能力快照：任务/记忆/技能/告警状态都在这一刻最完整。
+      try { requireCapabilityStatus().writeStatus(this.dataDir()); } catch { /* 面板读不到不影响对话 */ }
     } catch (error) {
       try { this.ctx.logger?.warn?.('[auto-guard] trace 记账失败: %s', error?.message ?? error); } catch { /* 无 logger */ }
     }
