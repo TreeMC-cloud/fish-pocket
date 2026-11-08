@@ -52,7 +52,10 @@ export function buildStatus(dataDir, { now = Date.now(), traceLimit = 200 } = {}
   const at = (name) => path.join(dataDir, name);
 
   // ── 任务表 ──
-  const tasks = readJson(at('.tasks.json'), null);
+  // 文件名必须和 task-registry.registryPath() 一致：那里是 `tasks.json`（没有前导点），
+  // 而这里原来读 `.tasks.json`。两个名字差一个点，结果任务记了但快照永远读不到，
+  // 面板一直显示「还没开始干活」——这种「两边各写一份约定」的错已经犯过好几次。
+  const tasks = readJson(at('tasks.json'), null);
   const taskStats = (() => {
     if (!tasks || typeof tasks.tasks !== 'object') {
       return { ok: false, reason: '还没有任务记录', total: 0, byStatus: {} };
