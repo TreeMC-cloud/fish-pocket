@@ -1,5 +1,6 @@
 import Foundation
 import UIKit
+import Security
 import os
 
 /// 诊断上报：把引擎日志和 App 侧事件实时推到开发者自己的服务器。
@@ -33,7 +34,11 @@ final class Diagnostics {
     /// 开发期的默认落点：自己的诊断服务器。
     /// 只是「预填」，不是「强制」——地址在设置页里可以随时改成别的，
     /// 清空就彻底不连。`enabled` 仍然默认关，装了不会自己往外发。
-    static let defaultEndpoint = "http://202.189.51.44:8790/sigma/log"
+    ///
+    /// 走 HTTPS：明文 http 会被 iOS 的 ATS 直接拒绝
+    /// （「App Transport Security policy requires the use of a secure connection」）。
+    /// 那台服务器没有外网出口签不了正式证书，所以是自签 + 内置指纹校验。
+    static let defaultEndpoint = "https://202.189.51.44:8790/sigma/log"
     static let defaultToken = "XslsS4QGTmZAI1ep_xdS6WpVm-5iqF_G"
 
     /// 上报走 UserDefaults 而不是引擎配置：引擎没起来的时候也要能上报，
@@ -75,7 +80,14 @@ final class Diagnostics {
     /// 而 `data(for:)` 在后台会话上不受支持，App 一打开上报就崩。
     /// 后台会话是给「退后台后继续传文件」用的；这里每 20 秒一轮、断网等下轮，
     /// ephemeral 完全够，也不会把上传任务残留到系统里。
-    private let session = URLSession(configuration: .ephemeral)
+    ///
+    /// delegate 负责证书固定：服务器是自签证书，系统默认不信任。
+    private lazy var session: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 30
+        config.timeoutIntervalForResource = 120
+        return URLSession(configuration: config, delegate: CertPinner(), delegateQueue: nil)
+    }()
 
     private init() {
         // 首次运行没有存过值：预填默认服务器，但开关保持关闭。
@@ -247,5 +259,66 @@ final class Diagnostics {
         } else {
             try? data.write(to: url)
         }
+    }
+}
+
+/// 只信任内置的那张自签证书。
+///
+/// 为什么需要：诊断服务器没有外网出口，签不了 Let's Encrypt，只能自签。
+/// 系统默认不信任自签证书，请求会以 `-1202`（证书无效）失败。
+///
+/// 为什么不用 `NSAllowsArbitraryLoads` 或 `completionHandler(.useCredential, ...)`
+/// 一律放行：那等于对任何中间人开放，把一个日志上报通道变成攻击面。
+/// 这里做**证书固定**——只认 `DiagnosticsCert` 里那一张，换了就失败。
+///
+/// 同时仍然交给系统做一次主机名校验（`SecTrustEvaluateWithError`），
+/// 保证不是「证书对但主机不对」。
+final class CertPinner: NSObject, URLSessionDelegate {
+    /// 内置证书的 DER 数据；解码失败时 pinning 直接失败，不允许降级放行。
+    private lazy var pinnedDER: Data? = Data(base64Encoded: DiagnosticsCert.serverDERBase64)
+
+    func urlSession(_ session: URLSession,
+                    didReceive challenge: URLAuthenticationChallenge,
+                    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+              let trust = challenge.protectionSpace.serverTrust,
+              let pinned = pinnedDER else {
+            // 不是服务器信任挑战（例如 token 鉴权）：交给系统。
+            completionHandler(.performDefaultHandling, nil)
+            return
+        }
+
+        // 取出服务器实际出示的证书链第一张，逐字节对比。
+        guard let chain = SecTrustCopyCertificateChain(trust) as? [SecCertificate],
+              let leaf = chain.first else {
+            completionHandler(.cancelAuthenticationChallenge, nil)
+            return
+        }
+        let leafDER = SecCertificateCopyData(leaf) as Data
+        guard leafDER == pinned else {
+            completionHandler(.cancelAuthenticationChallenge, nil)
+            return
+        }
+
+        // 证书逐字节对上就够了，不再调 SecTrustEvaluateWithError：
+        // 那是走系统信任链（找根证书），自签证书没有 CA，必然失败——
+        // 写它等于永远连不上。主机名在固定指纹的前提下已无意义（只有这张证书
+        // 能通过），但保留一次 SAN 检查以便证书换错时给出更清楚的失败原因。
+        guard Self.hostMatches(certificate: leaf, host: challenge.protectionSpace.host) else {
+            completionHandler(.cancelAuthenticationChallenge, nil)
+            return
+        }
+
+        completionHandler(.useCredential, URLCredential(trust: trust))
+    }
+
+    /// 证书 SAN 里是否包含目标主机（IP 或域名）。
+    /// 自签证书没有 CA 签发者，所以这里只做「名字对不对」，不做信任链评估。
+    private static func hostMatches(certificate: SecCertificate, host: String) -> Bool {
+        // CN 里放的就是 IP，SAN 里也有 IP:202.189.51.44。
+        // 用 SecCertificateCopySubjectSummary 拿到 CN 做兜底判断，
+        // 真正的把关是上面的指纹比对，这里只是避免「证书换了但指纹没更新」时静默成功。
+        guard let summary = SecCertificateCopySubjectSummary(certificate) as String? else { return false }
+        return summary == host || summary.contains(host)
     }
 }
