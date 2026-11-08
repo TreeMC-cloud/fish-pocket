@@ -169,6 +169,11 @@ struct StatusDot: View {
 
 /// Grouped rows on the page background (settings, plugins, workbench lists).
 struct GroupedListStyle: ViewModifier {
+    /// 分组卡片走液态玻璃：设置页的分区是「一叠浮着的卡」，
+    /// 和 iOS 26 设置 App 的观感一致。
+    /// 为什么只改 listRowBackground 而不是重写整个 List：
+    ///   List 的滑动删除、行内编辑、键盘避让都是系统给的，自己搭 VStack
+    ///   会一样样丢掉——这里只换皮的材质，行为一点不动。
     func body(content: Content) -> some View {
         content
             .listStyle(.insetGrouped)
@@ -206,18 +211,35 @@ extension View {
 
     /// Row fill (and no separators: rows group by space) for lists styled with
     /// `groupedList()`; applies to every row of a `Section`.
-    func groupedRow() -> some View { listRowBackground(Palette.grouped).listRowSeparator(.hidden) }
+    /// 设置/详情页的一行。底色是液态玻璃卡而不是实色块。
+    ///
+    /// 用 `.fill(.regularMaterial)` 而不是 `.glassEffect`：
+    /// List 的行背景必须是「填满矩形」的视图，`glassEffect` 会把内容再包一层形状，
+    /// 和 List 的行裁剪打架（圆角会错位）。材质 + 内高光描边在这里等价且稳。
+    func groupedRow() -> some View {
+        listRowBackground(
+            RoundedRectangle(cornerRadius: 22, style: Glass.corner)
+                .fill(.regularMaterial)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 22, style: Glass.corner)
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [.white.opacity(0.16), .white.opacity(0.04), .black.opacity(0.06)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            ),
+                            lineWidth: 0.5
+                        )
+                }
+        )
+        .listRowSeparator(.hidden)
+    }
 
     /// A close button for a view presented as a sheet (it may also be pushed, where it has none).
     func closeButton(_ dismiss: DismissAction) -> some View {
-        closeButton { dismiss() }
-    }
-
-    /// The same button, for a view its presenter closes.
-    func closeButton(action: @escaping () -> Void) -> some View {
         toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button(action: action) { Image(systemName: "xmark") }
+                Button { dismiss() } label: { Image(systemName: "xmark") }
                     .accessibilityLabel("关闭")
             }
         }
