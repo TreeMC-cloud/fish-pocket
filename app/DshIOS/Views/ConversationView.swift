@@ -414,10 +414,27 @@ struct ConversationView: View {
         let showsHeadline = !keyboardUp && heroHeight >= 220
         return VStack(spacing: 14) {
             if showsHeadline {
-                // The web's headline (`conversation.hero.headline`), so both shells greet the same way.
-                Text("探索未至之境").font(.system(size: 34, weight: .bold)).foregroundStyle(Palette.ink)
+                // 原来的「探索未至之境」不体现身份——用户打开 App 看不到自己在跟谁说话。
+                // 改成 Σ + Sigma 的主视觉：符号在左，名字在右，下面一行说明它是什么。
+                // 保留同样的字号与行高，不改变 hero 区域的高度预算。
+                VStack(spacing: 6) {
+                    HStack(spacing: 10) {
+                        Text("Σ")
+                            .font(.system(size: 36, weight: .semibold))
+                            .foregroundStyle(Palette.ink)
+                        Text("Sigma")
+                            .font(.system(size: 34, weight: .bold))
+                            .foregroundStyle(Palette.ink)
+                    }
                     .lineLimit(1).minimumScaleFactor(0.8)
+                    .accessibilityElement(children: .combine)
                     .accessibilityAddTraits(.isHeader)
+                    .accessibilityLabel("Sigma")
+
+                    Text("你的 DSH 助手")
+                        .font(.footnote)
+                        .foregroundStyle(Palette.secondary)
+                }
             }
             HStack(spacing: 8) {
                 Menu {
@@ -492,6 +509,15 @@ struct ConversationView: View {
                 }
                 .padding(.top, 14)
                 .transition(.opacity)
+            }
+
+            // 能力面板：把治理层在后台做的事摆出来。
+            // 放在快捷胶囊下面而不是上面——新用户第一眼该看到「能问什么」，
+            // 而不是「系统跑了几个任务」。等有数据了它自然会变成有价值的信息。
+            if !keyboardUp, app.capability != nil {
+                CapabilityPanel(status: app.capability)
+                    .padding(.top, 14)
+                    .transition(.opacity)
             }
         }
         .padding(.horizontal, 24)
