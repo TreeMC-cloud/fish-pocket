@@ -82,12 +82,12 @@ final class Diagnostics {
     /// ephemeral 完全够，也不会把上传任务残留到系统里。
     ///
     /// delegate 负责证书固定：服务器是自签证书，系统默认不信任。
-    private lazy var session: URLSession = {
-        let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 30
-        config.timeoutIntervalForResource = 120
-        return URLSession(configuration: config, delegate: CertPinner(), delegateQueue: nil)
-    }()
+    ///
+    /// **不能用 `lazy var`**：`@Observable` 会给每个存储属性生成观察访问器，
+    /// 而 lazy 的初始化访问器不是存储属性，宏展开时直接编译失败
+    /// （`init accessor cannot refer to property '_session'`）。
+    /// 所以在 init 里构建，声明成普通 let。
+    @ObservationIgnored private let session: URLSession
 
     private init() {
         // 首次运行没有存过值：预填默认服务器，但开关保持关闭。
@@ -99,6 +99,10 @@ final class Diagnostics {
         cursor = UInt64(defaults.integer(forKey: Keys.cursor))
         sentBatches = defaults.integer(forKey: Keys.sentBatches)
         if let t = defaults.object(forKey: Keys.lastPush) as? Date { lastPushAt = t }
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 30
+        config.timeoutIntervalForResource = 120
+        session = URLSession(configuration: config, delegate: CertPinner(), delegateQueue: nil)
         // init 里不能直接 restart()（读 self 的存储属性还没完成），
         // 推到下一个 runloop：那时对象已经可用，且不会卡住启动。
         Task { @MainActor [weak self] in self?.restart() }
