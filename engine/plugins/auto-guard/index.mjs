@@ -17,15 +17,21 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
 import { parentPort } from 'node:worker_threads';
 import { writeInFlight, describeStep } from '../../runtime/flight-recorder.mjs';
 
 const DEFAULT_TURNS_MAX = 40;
 const DEFAULT_REPEAT_MAX = 3;
-/** 内存低于这个比例就不许再派子任务——iOS 上会被系统静默杀掉。 */
-const MEMORY_STOP_RATIO = 0.10;
-/** 低于这个比例只警告。 */
-const MEMORY_WARN_RATIO = 0.20;
+/**
+ * 派活的负载红线，与 skills/cost-guard/load-gate.mjs 同一口径（用户定的规矩）：
+ * 已用 ≥90% 停止派单，≥95% 停重活。
+ * 这两个数只在 load-gate.mjs 里作为「权威定义」，这里是为了同步拦截而复制；
+ * 改阈值必须两边一起改，否则会出现「命令行说可以派、插件却拒绝」的分裂。
+ */
+const MEMORY_STOP_PCT = 90;
+const MEMORY_HEAVY_PCT = 95;
 /** 这些工具名说明"在派活"，派之前要查负载、派之后要记账。 */
 const DISPATCH_TOOL_PATTERN = /^(subagent|wb_submit_task|wb_task_status)$/;
 
@@ -88,6 +94,8 @@ export default class AutoGuard {
      * 读取与清理由 main.mjs 在启动新引擎之前完成。
      */
     this.inFlight = new Map();
+    /** 上次查「未回执派单」的时间，避免每轮重复 spawn sentinel。 */
+    this.lastDispatchCheck = 0;
 
     ctx.effect(() => {
       const offs = [
@@ -101,19 +109,30 @@ export default class AutoGuard {
         }),
       ];
 
-      // 工具调用前：拦截「内存吃紧还派子任务」这种会拖垮 App 的操作。
+      // 工具调用前：拦截「负载过高还派子任务」这种会拖垮 App 的操作。
       // 用 ctx.on 注册管线事件，没有就静默跳过（不同版本可能没有这个事件）。
+      //
+      // 判据来自 cost-guard/load-gate.mjs：CPU 或内存 ≥90% 不许派单、≥95% 停重活。
+      // 但这里**不能**用它的 1.5s 采样——pre-execute 是同步钩子，阻塞一秒半
+      // 会让每次派活都卡一下。改用瞬时值（内存直接读 /proc/meminfo，CPU 用
+      // 上一轮采样缓存），宁可保守也不拖慢交互。
       if (typeof ctx.on === 'function') {
         try {
           ctx.on('tools/pre-execute', (call, next) => {
             const name = call?.name ?? call?.tool;
             if (!name || !DISPATCH_TOOL_PATTERN.test(name)) return next?.(call);
             const mem = this.memoryPressure();
-            if (mem && mem.ratio < MEMORY_STOP_RATIO) {
+            if (!mem) return next?.(call);   // 量不了不等于可以派，但也不该误杀正常派活
+            const usedPct = (1 - mem.ratio) * 100;
+            if (usedPct >= MEMORY_HEAVY_PCT) {
               // 拒绝：给出可行动的理由，不是干巴巴的 "denied"
-              return `内存只剩 ${(mem.ratio * 100).toFixed(0)}%（${mem.freeMB}MB/${mem.totalMB}MB），` +
-                     `再派任务会被 iOS 静默杀掉（表现为 App 突然回到桌面）。` +
-                     `先等现有任务结束，或者改用更小的任务。`;
+              return `内存已用 ${usedPct.toFixed(0)}%（剩 ${mem.freeMB}MB/${mem.totalMB}MB），超过 ${MEMORY_HEAVY_PCT}% 停重活线。` +
+                     `此时再派任务会被 iOS 静默杀掉（表现为 App 突然回到桌面）。` +
+                     `先等现有任务结束或重启 App，再派活。`;
+            }
+            if (usedPct >= MEMORY_STOP_PCT) {
+              return `内存已用 ${usedPct.toFixed(0)}%（剩 ${mem.freeMB}MB/${mem.totalMB}MB），超过 90% 派单线。` +
+                     `先收尾现有任务，或者改用更小的任务；继续派子代理很可能被系统杀掉。`;
             }
             return next?.(call);
           });
@@ -184,8 +203,14 @@ export default class AutoGuard {
     // 重启后提示「3 个任务被打断」只会让人莫名其妙——父会话自己会报。
     // （onTurnEnd 里原本就有同样的过滤，两处必须一致。）
     if (String(session?.header?.origin ?? '') !== 'subagent') {
-      // 飞行记录：这一轮开始跑了。崩溃时这个条目会留在 in-flight.json 里。
-      this.inFlight.set(sessionId(session), { at: Date.now(), step: '' });
+      // turn/start 的 event.data 在部分 Harness 版本不带 turn 编号；session
+      // 的持久事件列表里刚追加的 turn/start 带有确切 turn，用它而不是猜 s.turns
+      //（后者是插件进程内计数，重启后会从 1 重新开始）。
+      const events = typeof session?.ownEvents === 'function' ? session.ownEvents() : session?.events;
+      const turn = Array.isArray(events)
+        ? [...events].reverse().find((item) => item?.type === 'turn/start')?.data?.turn
+        : undefined;
+      this.inFlight.set(sessionId(session), { at: Date.now(), step: '', turn: Number.isInteger(turn) ? turn : null });
       this.persistInFlight();
     }
 
@@ -206,6 +231,60 @@ export default class AutoGuard {
         { kind: 'turns', turns: s.turns, session: sessionId(session) },
       );
     }
+
+    // 派单催办：把 sentinel.mjs 那条「未回执」检查接进每轮，不再靠自觉去跑。
+    //
+    // 为什么必须是机制：sentinel.mjs 早就写好了 open/awaited 和超时判断，
+    // 但全仓没有一处调用它——和轮次计数、记忆注入是同一个病：能力在，触发无。
+    // 靠人记得跑，漏掉的恰好是「最该催」的那几条。
+    this.checkDispatches(session);
+  }
+
+  /**
+   * 每轮开始时看一眼：有没有发出去很久还没人回的派单。
+   *
+   * 每分钟最多查一次（同一进程内多会话会各自触发，不缓存就会重复 spawn）。
+   * 只看 `open`（我发出没回的）；`awaited`（别人等我的）由 Agent 自己按
+   * 技能文档处理，插件不替它回答。
+   */
+  checkDispatches(session) {
+    const now = Date.now();
+    if (now - (this.lastDispatchCheck ?? 0) < 60_000) return;
+    this.lastDispatchCheck = now;
+
+    try {
+      const tool = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../skills/dispatch-protocol/sentinel.mjs');
+      if (!fs.existsSync(tool)) return;   // 被裁剪过的构建：静默跳过，不是错误
+
+      // 用 execFileSync 而不是 shell：iOS 上没有真正的 fork/exec，但 Node 的
+      // child_process 在引擎里已被 shim 成 worker（runtime/child-process.mjs），
+      // 这条路是通的。反引号/空格也不用转义。
+      let out;
+      try {
+        out = execFileSync(process.execPath, [tool, 'open', '--stale', '30'], {
+          encoding: 'utf8',
+          timeout: 5000,
+          env: { ...process.env, DSH_SENTINEL_LEDGER: this.ledgerFile() },
+        });
+      } catch (error) {
+        // 退出码 1 = 发现超时派单（这是我们要的）；2 = 用法错；其它 = 工具本身坏了。
+        if (error?.status === 1 && typeof error.stdout === 'string') out = error.stdout;
+        else return;
+      }
+
+      const overdue = String(out ?? '').match(/⚠\s*(\d+)\s*条超时未回执/);
+      if (!overdue || Number(overdue[1]) === 0) return;
+      this.notify(
+        `有 ${overdue[1]} 个派单超时没回执。别假设对方在跑——查一下，或者直接催/自己接手。`,
+        { kind: 'dispatch', count: Number(overdue[1]), session: sessionId(session) },
+      );
+    } catch { /* 催办是提醒，失败了不影响这一轮 */ }
+  }
+
+  /** 派单台账路径，与 sentinel.mjs 的默认口径一致。 */
+  ledgerFile() {
+    return process.env.DSH_SENTINEL_LEDGER
+      || path.join(process.env.DSH_IOS_DATA || process.cwd(), '.sentinel.jsonl');
   }
 
   /**
