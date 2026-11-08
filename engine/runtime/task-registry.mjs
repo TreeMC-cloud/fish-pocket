@@ -77,22 +77,69 @@ function emptyState() {
 }
 
 /** 读文件；不存在/损坏都返回空状态，不让一个坏文件卡死整个调度。 */
+/**
+ * 读任务表。
+ *
+ * ⚠ 版本校验不能省：早先的写法是 `parsed.schemaVersion ?? SCHEMA_VERSION`，
+ * 只读不校验——将来格式改了，旧文件会被当成新格式直接读进来，
+ * 字段缺失的地方静默变成 undefined，任务状态错乱且不报错。
+ *
+ * 现在的策略：
+ *   - 版本相同 → 正常读
+ *   - 版本更低（旧文件）→ 走迁移
+ *   - 版本更高（文件比代码新，说明降级了）→ **拒绝加载并抛出**，
+ *     宁可让用户看到错误，也不要按错误的理解去改数据
+ */
 export function load(dataDir) {
   const file = registryPath(dataDir);
+  let raw;
   try {
-    const raw = fs.readFileSync(file, 'utf8');
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object' || !parsed.tasks) return emptyState();
-    return {
-      schemaVersion: parsed.schemaVersion ?? SCHEMA_VERSION,
-      seq: Number.isInteger(parsed.seq) ? parsed.seq : 0,
-      tasks: parsed.tasks,
-      idempotency: parsed.idempotency ?? {},
-      outbox: Array.isArray(parsed.outbox) ? parsed.outbox : [],
-    };
+    raw = fs.readFileSync(file, 'utf8');
   } catch {
+    return emptyState();          // 文件不存在：全新安装
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    // 坏 JSON：备份一份再当空处理，别让用户的数据凭空消失
+    try { fs.renameSync(file, `${file}.corrupt-${Date.now()}`); } catch { /* 备份失败也不阻止启动 */ }
     return emptyState();
   }
+
+  if (!parsed || typeof parsed !== 'object' || !parsed.tasks) return emptyState();
+
+  const version = Number.isInteger(parsed.schemaVersion) ? parsed.schemaVersion : 1;
+  if (version > SCHEMA_VERSION) {
+    throw new Error(
+      `任务表版本 ${version} 比当前代码支持的 ${SCHEMA_VERSION} 新。` +
+      '这说明你装过更新的版本又退回来了；继续读写会损坏数据。' +
+      `请先备份 ${file}，再删除它或升级到新版。`,
+    );
+  }
+
+  const migrated = version < SCHEMA_VERSION ? migrate(parsed, version) : parsed;
+
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    seq: Number.isInteger(migrated.seq) ? migrated.seq : 0,
+    tasks: migrated.tasks ?? {},
+    idempotency: migrated.idempotency ?? {},
+    outbox: Array.isArray(migrated.outbox) ? migrated.outbox : [],
+  };
+}
+
+/**
+ * 迁移到当前版本。目前只有 v1，没有历史版本要迁；
+ * 留着这个函数是为了**下一个改格式的人有地方写**，
+ * 而不是直接改 load() 里的默认值糊过去。
+ */
+function migrate(parsed, fromVersion) {
+  let state = parsed;
+  // if (fromVersion < 2) state = migrateV1toV2(state);
+  void fromVersion;
+  return state;
 }
 
 /** 原子写：tmp + rename，崩溃时不会留下半个 JSON。 */
