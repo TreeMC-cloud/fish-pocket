@@ -1,6 +1,10 @@
 ---
 name: attention-discipline
 description: 一个通知、一个问题、一段报告都在花别人的注意力，必须值得。要发消息、问问题、主动做事之前用。
+version: 1.0.0
+source: handwritten
+permissions: [read-only]
+
 ---
 
 # 注意力纪律
