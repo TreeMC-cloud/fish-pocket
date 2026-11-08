@@ -678,6 +678,13 @@ export default class AutoGuard {
       // 记忆插件自己发的内省轮次不算工作，记进来会污染统计。
       if (String(session?.header?.origin ?? '') === 'subagent') return;
 
+      // 能力快照必须**每轮结束都刷一次**，而且要在所有「可能提前 return 的分支」之前：
+      // 原来它写在 `if (!summary) return;` 之后，凡是取不到摘要的轮次
+      // （工具密集、纯执行、模型没输出正文）就都不会刷新，
+      // 面板于是长期停在旧状态甚至「还没开始干活」。
+      // 快照是纯投影，写失败也不影响对话，所以放最前面最安全。
+      try { requireCapabilityStatus().writeStatus(this.dataDir()); } catch { /* 面板读不到不影响对话 */ }
+
       const events = typeof session?.ownEvents === 'function' ? session.ownEvents() : session?.events;
       const list = Array.isArray(events) ? events : [];
 
@@ -737,8 +744,6 @@ export default class AutoGuard {
       });
 
       s.traceWritten = true;
-      // 每轮结束刷新能力快照：任务/记忆/技能/告警状态都在这一刻最完整。
-      try { requireCapabilityStatus().writeStatus(this.dataDir()); } catch { /* 面板读不到不影响对话 */ }
     } catch (error) {
       try { this.ctx.logger?.warn?.('[auto-guard] trace 记账失败: %s', error?.message ?? error); } catch { /* 无 logger */ }
     }
