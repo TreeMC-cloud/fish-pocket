@@ -94,6 +94,12 @@ enum PanelDockPicker {
     ///
     /// 用 `items` 而不是原始事件：`Timeline` 已经把消息拆成了正文块，
     /// 这里只要顺着正文找最后一个 ```schemaJson 就够，不必重新解析事件流。
+    ///
+    /// 从 `items` 里扫出最后一个可钉面板。
+    ///
+    /// 不在这里做缓存：这个函数在 `body` 里调用，缓存必须跟着会话走，
+    /// 放成 static 会让 A 会话的面板漏到 B 会话。调用方用 `@State` 持有一份，
+    /// 并在 `items.last?.id` 变化时重算（见 ConversationView）。
     static func latest(in items: [Timeline.Item]) -> (node: JSON, title: String, id: String)? {
         for item in items.reversed() {
             guard case .assistant(_, let blocks, _, _) = item else { continue }
@@ -129,5 +135,59 @@ enum PanelDockPicker {
             if inBlock { buffer.append(String(line)) }
         }
         return nil
+    }
+}
+
+/// 钉住的面板。单独定义是因为 `@State` 需要 `Equatable`（`onChange` 判等用）。
+struct PinnedPanel: Equatable {
+    let node: JSON
+    let title: String
+    let id: String
+
+    static func == (lhs: PinnedPanel, rhs: PinnedPanel) -> Bool { lhs.id == rhs.id }
+}
+
+// MARK: - 钉住环境值
+
+/// 把「钉住这张面板」的动作为 Markdown 渲染好的面板提供下去。
+///
+/// 为什么用 Environment 而不是给 MarkdownView 加参数：
+///   MarkdownView 的签名被时间线、详情页、子代理页好几处用，
+///   加一个只有面板关心的参数会污染所有调用点，还容易漏传。
+private struct PinPanelKey: EnvironmentKey {
+    static let defaultValue: ((JSON, String) -> Void)? = nil
+}
+
+extension EnvironmentValues {
+    var pinPanel: ((JSON, String) -> Void)? {
+        get { self[PinPanelKey.self] }
+        set { self[PinPanelKey.self] = newValue }
+    }
+}
+
+/// 面板右上角的小按钮：把这它钉到面板坞。
+struct PinPanelButton: View {
+    let node: JSON
+    let title: String
+    @Environment(\.pinPanel) private var pin
+
+    var body: some View {
+        if let pin {
+            Button {
+                Haptics.tap()
+                pin(node, title)
+            } label: {
+                Image(systemName: "pin")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Palette.secondary)
+                    .frame(width: 26, height: 26)
+                    .glassSurface(
+                        RoundedRectangle(cornerRadius: 8, style: Glass.corner),
+                        .floating
+                    )
+            }
+            .buttonStyle(GlassButtonStyle())
+            .accessibilityLabel("钉到面板坞")
+        }
     }
 }
