@@ -150,6 +150,15 @@ function requireTaskRunner() {
   return globalThis.__taskRunnerMod;
 }
 
+/** schedule-bridge：把 DSH 定时任务到期项收进 Router 队列。 */
+function requireScheduleBridge() {
+  if (!globalThis.__scheduleBridgeMod) {
+    const req = createRequire(import.meta.url);
+    globalThis.__scheduleBridgeMod = req('../../runtime/schedule-bridge.mjs');
+  }
+  return globalThis.__scheduleBridgeMod;
+}
+
 function requireSkillRegistry() {
   if (!globalThis.__skillRegMod) {
     const req = createRequire(import.meta.url);
@@ -331,6 +340,38 @@ ctx.effect(() => {
           logger: this.ctx.logger,
         }),
       });
+      // ⚠ 这里**不**去 harvest DSH 的定时任务。
+      //
+      // 曾经这么做过，是错的：DSH 的 schedule 自带完整的自动投递循环
+      // （runtime.requestDrive + setTimeout + timer.unref），App 活着时它会
+      // 自己到点投递、自己推进 scheduledAt。Router 再收一遍 = 同一个任务
+      // 被执行两次；而且 Router 绕过 DSH 投递后 scheduledAt 不推进，
+      // 同一个任务会每 15 秒被重新当成"到期"（幂等键也挡不住，因为键里带
+      // scheduledAt，值根本没变才是它一直"到期"的原因）。
+      //
+      // 结论：定时任务的投递权归 DSH。Router 只处理那些**没有别人负责**的任务
+      // （失败重排、子任务回收）。判断某个来源该不该接，先看它有没有自动执行者。
+      // 顺带记一笔 schedule 的观察结果（只读，不接管投递）。
+      // buildStatus 是同步的，读不到 ctx.get('schedule') 这种异步服务，
+      // 所以由这里落一个文件给它读——和 in-flight.json 同一个模式。
+      try {
+        const svc = ctx.get?.('schedule');
+        if (svc && typeof svc.catalog === 'function') {
+          const entries = await svc.catalog();
+          const bridge = requireScheduleBridge();
+          const now = Date.now();
+          const rows = (Array.isArray(entries) ? entries : []).map((e) => ({
+            ...bridge.summarize(e),
+            due: bridge.isDue(e, now),
+          }));
+          fs.writeFileSync(
+            path.join(this.dataDir(), 'schedule-view.json'),
+            JSON.stringify({ at: now, total: rows.length, rows: rows.slice(0, 50) }),
+            { mode: 0o600 },
+          );
+        }
+      } catch { /* schedule 不可用不影响调度 */ }
+
       const result = await tick(router);
       if (result.started.length > 0) {
         try {
