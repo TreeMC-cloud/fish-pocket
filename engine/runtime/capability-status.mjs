@@ -58,14 +58,28 @@ export function buildStatus(dataDir, { now = Date.now(), traceLimit = 200 } = {}
   const tasks = readJson(at('tasks.json'), null);
   const taskStats = (() => {
     if (!tasks || typeof tasks.tasks !== 'object') {
-      return { ok: false, reason: '还没有任务记录', total: 0, byStatus: {} };
+      return { ok: false, reason: '还没有任务记录', total: 0, byStatus: {}, needsAttention: [] };
     }
     const byStatus = {};
     for (const t of Object.values(tasks.tasks)) {
       const s = t?.status ?? 'unknown';
       byStatus[s] = (byStatus[s] ?? 0) + 1;
     }
-    return { ok: true, total: Object.keys(tasks.tasks).length, byStatus };
+    // 待人工确认的任务要露出来。
+    // 状态机故意不让失败任务自动重跑（有副作用的操作重来可能更糟），
+    // 但只统计个数字等于把问题藏起来——用户看不到是哪些、为什么卡住。
+    const needsAttention = Object.values(tasks.tasks)
+      .filter((t) => t?.status === 'needs_reconciliation')
+      .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
+      .slice(0, 10)
+      .map((t) => ({
+        taskId: t.taskId ?? null,
+        title: String(t.title ?? '').slice(0, 120),
+        error: String(t.lastError ?? '').slice(0, 200),
+        deferCount: t.deferCount ?? 0,
+        updatedAt: t.updatedAt ?? 0,
+      }));
+    return { ok: true, total: Object.keys(tasks.tasks).length, byStatus, needsAttention };
   })();
 
   // ── Dream 整理 ──
