@@ -19,6 +19,7 @@
 
 import fs from 'node:fs';
 import os from 'node:os';
+import path from 'node:path';
 
 const DEFAULT_TURNS_MAX = 40;
 const DEFAULT_REPEAT_MAX = 3;
@@ -28,6 +29,43 @@ const MEMORY_STOP_RATIO = 0.10;
 const MEMORY_WARN_RATIO = 0.20;
 /** 这些工具名说明"在派活"，派之前要查负载、派之后要记账。 */
 const DISPATCH_TOOL_PATTERN = /^(subagent|wb_submit_task|wb_task_status)$/;
+
+/** 追加一行 JSON。写失败不抛 —— 记账是副产物，坏了不该影响对话。 */
+function appendJsonl(file, obj) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.appendFileSync(file, JSON.stringify(obj) + '\n', { mode: 0o600 });
+}
+
+/**
+ * 从摘要里认出「这件事属于什么话题」，给 trace 打标签。
+ *
+ * 为什么不用工具名当标签：工具名只有 Bash / Read / Edit 那么几个，按它聚类
+ * 提炼出来的是「Bash 老出问题」——正确但没用。人想知道的是「下载这套流程
+ * 我踩过什么坑」。所以按关键词认话题。
+ *
+ * 为什么用关键词而不是分词：中文分词要词库，iOS 包体积不值这个价；而且这些
+ * 话题是封闭集合（这个项目常见的几摊事），关键词表够用且完全可预测——
+ * 匹配不上就是没话题，不会瞎归类。
+ */
+const TOPIC_RULES = [
+  [/下载|ipa|blob|分片|curl|wget/i, '下载'],
+  [/构建|编译|build|xcode|gym|archive/i, '构建'],
+  [/图标|icon|png|图片|image/i, '图片'],
+  [/记忆|memory|meow/i, '记忆'],
+  [/测试|test|pytest|断言|assert/i, '测试'],
+  [/记忆|偏好|prefs/i, '偏好'],
+  [/推送|push|commit|git|github/i, '版本'],
+  [/UI|界面|swift|view/i, '界面'],
+];
+
+function topicsOf(text) {
+  const t = String(text ?? '');
+  const hit = [];
+  for (const [re, name] of TOPIC_RULES) {
+    if (re.test(t) && !hit.includes(name)) hit.push(name);
+  }
+  return hit;
+}
 
 export default class AutoGuard {
   static inject = [];
@@ -44,6 +82,7 @@ export default class AutoGuard {
       const offs = [
         ctx.on('session/event', (session, event) => {
           if (event?.type === 'turn/start') this.onTurnStart(session, event);
+          else if (event?.type === 'turn/end') this.onTurnEnd(session, event);
           else if (event?.type === 'tool/result') this.onToolResult(session, event);
           else if (event?.type === 'compaction/start') this.onCompaction(session, event);
         }),
@@ -116,6 +155,15 @@ export default class AutoGuard {
     const s = this.runtime(session);
     s.turns += 1;
 
+    // 落盘记一笔 —— 这是 cost-guard 那条闭环的开关。
+    //
+    // 之前的窟窿：轮次只记在内存里（this.state 是 WeakMap），进程重启清零，
+    // 而 skills/cost-guard/turns.mjs 读的是 .turns.jsonl —— 那个文件从来没人写。
+    // 结果就是 `turns.mjs status` 永远显示 0 轮，40 轮红线永不触发，
+    // 「该换会话了」这句提醒等于不存在。
+    // 现在每轮往同一个文件追加一行，两边用同一份事实。
+    this.recordTurn(session, s.turns);
+
     if (s.turns > this.turnsMax && !s.warnedTurn) {
       s.warnedTurn = true;
       this.notify(
@@ -124,6 +172,104 @@ export default class AutoGuard {
         { kind: 'turns', turns: s.turns },
       );
     }
+  }
+
+  /**
+   * 把这一轮写进 cost-guard 的事件文件，格式与 turns.mjs 的 appendEvent 一致：
+   * 每行一个 `{kind, at, ...}` 事件，只追加。
+   *
+   * 为什么不直接 import turns.mjs：那是给人跑的 CLI，带 process.exit 和
+   * 一整套参数解析，在插件里调会污染进程。这里只复刻它的存储格式——
+   * 格式是两边唯一的契约，保持最小耦合。
+   *
+   * 路径规则跟 turns.mjs 一致：DSH_TURNS_FILE 优先，否则数据目录下的
+   * .turns.jsonl。不写到 cwd（iOS 上 cwd 是只读的包目录）。
+   */
+  recordTurn(session, turns) {
+    try {
+      const file = process.env.DSH_TURNS_FILE
+        || path.join(process.env.DSH_IOS_DATA || process.cwd(), '.turns.jsonl');
+      const line = JSON.stringify({
+        kind: 'tick',
+        at: Date.now(),
+        turns,
+        tokens: 0,
+        session: String(session?.id ?? ''),
+      }) + '\n';
+      fs.appendFileSync(file, line, { mode: 0o600 });
+    } catch (error) {
+      // 记账失败不该影响对话本身：坏一个计数文件，比让这一轮发不出去好。
+      try { this.ctx.logger?.warn?.('[auto-guard] turns 记账失败: %s', error?.message ?? error); } catch { /* 无 logger */ }
+    }
+  }
+
+  /**
+   * 一轮结束时记一条 trace —— 进化闭环的入口。
+   *
+   * 为什么放在插件里而不是写进 AGENTS.md 让 agent 自己记：靠自觉的调用早晚会漏，
+   * 而漏掉的正是「失败的那几轮」——恰恰是最该沉淀的经验。机器记则不会漏。
+   *
+   * 记什么：成功/失败、用了哪些工具、这轮大致在干什么。摘要从这一轮的
+   * 用户消息和最后的助手回复里各取一点，够蒸馏时认出来就行，不做全文存档。
+   *
+   * 失败绝不打断流程：trace 是副产物，坏了就坏了。
+   */
+  onTurnEnd(session, event) {
+    try {
+      const s = this.runtime(session);
+      const reason = event?.data?.reason?.kind;
+      // 记忆插件自己发的内省轮次不算工作，记进来会污染统计。
+      if (String(session?.header?.origin ?? '') === 'subagent') return;
+
+      const events = typeof session?.ownEvents === 'function' ? session.ownEvents() : session?.events;
+      const list = Array.isArray(events) ? events : [];
+
+      // 从本轮起点往回找摘要材料。只取有内容的文本块，跳过工具参数之类。
+      const tools = [];
+      let userText = '';
+      let assistantText = '';
+      for (const e of list) {
+        if (e?.type === 'tool/ptc-dispatch' && typeof e.data?.name === 'string') {
+          if (!tools.includes(e.data.name)) tools.push(e.data.name);
+        } else if (e?.type === 'user/message') {
+          for (const b of e.data?.content ?? []) {
+            if (b?.type === 'text' && typeof b.text === 'string' && !b.text.startsWith('[')) {
+              userText = b.text;   // 取最后一条用户消息
+            }
+          }
+        } else if (e?.type === 'assistant/message') {
+          for (const b of e.data?.content ?? []) {
+            if (b?.type === 'text' && typeof b.text === 'string') {
+              assistantText = assistantText ? assistantText + ' ' + b.text : b.text;
+            }
+          }
+        }
+      }
+
+      const summary = assistantText || userText;
+      if (!summary) return;   // 空轮次没必要记
+
+      appendJsonl(this.traceFile(), {
+        at: Date.now(),
+        kind: 'task',
+        ok: reason === 'error' ? false : true,
+        summary: summary.replace(/\s+/g, ' ').trim().slice(0, 300),
+        // 用话题标签而不是工具名：见 TOPIC_RULES 的注释。
+        tags: topicsOf(summary + ' ' + userText),
+        tools: tools.slice(0, 6),
+        source: 'auto-guard',
+      });
+
+      s.traceWritten = true;
+    } catch (error) {
+      try { this.ctx.logger?.warn?.('[auto-guard] trace 记账失败: %s', error?.message ?? error); } catch { /* 无 logger */ }
+    }
+  }
+
+  /** trace 文件路径，与 skills/evolve/trace.mjs 保持同一口径。 */
+  traceFile() {
+    return process.env.DSH_TRACE_FILE
+      || path.join(process.env.DSH_IOS_DATA || process.cwd(), '.trace.jsonl');
   }
 
   onToolResult(session, event) {
