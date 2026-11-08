@@ -65,6 +65,7 @@ struct DrawerView: View {
         NavigationStack {
             VStack(spacing: 0) {
                 topBar
+                CredentialStatusPill(openThirdParty: openThirdParty, openSettings: openSettings)
                 newConversationButton
 
                 List {
