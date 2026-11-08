@@ -19,7 +19,7 @@
  *   - 不自动重跑有副作用的失败任务：走 needs_reconciliation
  *   - 每个任务只有一个 owner：抢占时校验，不是先到先得
  */
-import { load, save, create, transition, enqueue, expired, pendingOutbox } from './task-registry.mjs';
+import { load, save, create, transition, enqueue, expired, pendingOutbox, TaskError } from './task-registry.mjs';
 import { gate as gateTask } from './delivery-gate.mjs';
 
 /** 默认并发：1。可被 config 覆盖，但不要在没有实测的情况下调高。 */
@@ -163,6 +163,34 @@ export class Router {
   approve(taskId, by = 'user') {
     const state = this.state();
     transition(state, taskId, 'queued', { by, now: this.now() });
+    save(state, this.dataDir);
+    return state.tasks[taskId];
+  }
+
+  /**
+   * 人工确认后重排：needs_reconciliation → queued。
+   *
+   * 为什么要人点一下：失败的任务**不自动重跑**（有副作用的操作重来可能更糟），
+   * 这是状态机刻意设计的。但光有「等人工」没有「人工在哪点」等于死路——
+   * 这个方法是那个「点」。
+   *
+   * 重排时必须清掉三样东西，否则任务会立刻又被判失败：
+   *   - failCount / lastFailReason：不清的话连续失败计数继续累加，一下就到改道阈值
+   *   - deferCount / deferAfter：上次延后留下的冷却不该带到重排之后
+   *   - leaseUntil：旧租约会让 sweep 立刻把它当僵尸
+   */
+  requeue(taskId, { by = 'user' } = {}) {
+    const state = this.state();
+    const task = state.tasks[taskId];
+    if (!task) throw new TaskError(`没有这个任务：${taskId}`, 'missing');
+    transition(state, taskId, 'queued', { by, now: this.now() });
+    task.failCount = 0;
+    task.lastFailReason = null;
+    task.deferCount = 0;
+    task.deferAfter = null;
+    task.leaseUntil = null;
+    task.heartbeatAt = null;
+    task.lastError = null;
     save(state, this.dataDir);
     return state.tasks[taskId];
   }
