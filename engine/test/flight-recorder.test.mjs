@@ -64,5 +64,45 @@ test('单个任务时文案是单数', () => {
   writeInFlight(dir, { only: Date.now() - 1000 });
   const lines = [];
   reportInterrupted(dir, { write: (l) => lines.push(l) });
-  assert.match(JSON.parse(lines[0]).message, /一个任务/);
+  // 单数不点名数量（标题已经说了「任务没跑完」），只说后果与下一步。
+  assert.equal(JSON.parse(lines[0]).message,
+    '被引擎重启中断。先看看已经改了什么，再决定要不要重新发一次。');
+});
+
+test('多个任务时点名数量', () => {
+  const dir = tmp();
+  const now = Date.now();
+  writeInFlight(dir, { a: { at: now - 2000, step: '' }, b: { at: now - 1000, step: '' } });
+  const lines = [];
+  reportInterrupted(dir, { now, write: (l) => lines.push(l) });
+  assert.match(JSON.parse(lines[0]).message, /2 个任务/);
+});
+
+test('旧格式（值是时间戳）仍然能读，只是没有步骤', () => {
+  const dir = tmp();
+  const now = Date.now();
+  // 模拟升级前写下的文件：{"running":{"s1":1794...}}
+  fs.writeFileSync(path.join(dir, 'in-flight.json'), JSON.stringify({ running: { s1: now - 5000 } }));
+  const read = readInFlight(dir);
+  assert.equal(read.length, 1);
+  assert.equal(read[0].session, 's1');
+  assert.equal(read[0].step, '');
+
+  const lines = [];
+  reportInterrupted(dir, { now, write: (l) => lines.push(l) });
+  const record = JSON.parse(lines[0]);
+  assert.deepEqual(record.sessions, ['s1']);
+  assert.equal(record.steps.s1, '');
+  assert.doesNotMatch(record.message, /停在/, '没有步骤时不该编出一个');
+});
+
+test('新格式带着步骤，提示里说得出来', () => {
+  const dir = tmp();
+  const now = Date.now();
+  writeInFlight(dir, { s9: { at: now - 2000, step: '正在运行命令（npm run build）' } });
+  const lines = [];
+  reportInterrupted(dir, { now, write: (l) => lines.push(l) });
+  const record = JSON.parse(lines[0]);
+  assert.equal(record.steps.s9, '正在运行命令（npm run build）');
+  assert.match(record.message, /停在「正在运行命令（npm run build）」/);
 });
