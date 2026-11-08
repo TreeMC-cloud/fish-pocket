@@ -596,33 +596,6 @@ export default class AutoGuard {
     } catch { /* 场景解析失败不影响对话 */ }
   }
 
-  /**
-   * 把 task registry 的 outbox 投递到提醒通道，并 ack。
-   *
-   * 为什么放在每轮：没有常驻定时器的 iOS 环境里，轮次是唯一可靠的节拍。
-   * 代价是 outbox 里的消息最多晚一轮才送达——比丢了好。
-   */
-  flushTaskOutbox(session) {
-    try {
-      const state = loadTasks(this.dataDir());
-      const pending = pendingOutbox(state);
-      if (!pending.length) return;
-      for (const event of pending.slice(0, 5)) {   // 一次最多 5 条，避免刷屏
-        // eventId 跟着走：main.mjs 透传进 notices.jsonl，App 按 id 去重。
-        this.notify(event.message, {
-          ...(event.detail ?? {}),
-          eventId: event.eventId,
-          kind: event.kind,
-          taskId: event.taskId,
-          session: sessionId(session),
-        });
-        ackTaskEvent(state, event.eventId);
-      }
-      saveTasks(state, this.dataDir());
-    } catch (error) {
-      try { this.ctx.logger?.warn?.('[auto-guard] task outbox 投递失败: %s', error?.message ?? error); } catch { /* 无 logger */ }
-    }
-  }
 
   /**
    * 每轮顺手看一眼该不该跑 Dream。
