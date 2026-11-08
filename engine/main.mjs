@@ -136,10 +136,23 @@ function start() {
     if (message?.type === 'dsh-ios/notice') {
       console.warn(`[auto-guard] ${message.level ?? 'info'}: ${message.message ?? ''}`);
       if (admitNotice(message)) {
+        // ⚠ 字段契约：Swift 侧读的是**顶层** kind / message / sessions / turns。
+        // 早先这里把 kind 写死成 'notice' 并把业务字段塞进 detail，结果：
+        //   · 中断横幅永远不出现（判断 obj["kind"] == "interrupted" 永不成立）
+        //   · 点「去查看」跳不到会话（sessions 在 detail 里，顶层读不到）
+        // 现在把 detail 展开到顶层，kind 用实际业务类型。
+        const detail = message.detail ?? {};
         const record = {
-          kind: 'notice',
+          // eventId 透传：App 靠它去重（outbox 是至少一次投递，重投是预期）。
+          // 没有它，App 只能按行号判断，同一事件重投就会弹两遍。
+          eventId: message.eventId ?? detail.eventId ?? null,
+          kind: detail.kind ?? 'notice',
           message: message.message,
-          detail: message.detail ?? null,
+          sessions: detail.sessions ?? null,
+          steps: detail.steps ?? null,
+          turns: detail.turns ?? null,
+          taskId: detail.taskId ?? null,
+          detail,
           time: Date.now(),
         };
         try {
