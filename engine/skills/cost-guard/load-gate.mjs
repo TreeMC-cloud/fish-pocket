@@ -27,6 +27,7 @@
  *   node load-gate.mjs --min-ok 80 --min-warn 92   覆盖阈值（仅用于负例自测）
  */
 import fs from 'node:fs';
+import os from 'node:os';
 import { pathToFileURL } from 'node:url';
 
 const MEM_STOP = 90;
@@ -35,21 +36,50 @@ const CPU_STOP = 90;
 const CPU_HEAVY = 95;
 
 function readMem() {
+  // 优先 /proc/meminfo 的 MemAvailable：它是内核算好的「真实可用」，含可回收缓存。
+  //
+  // ⚠ 关键坑（实测）：iSH 的 /proc/meminfo **没有 MemAvailable 字段**，只有 MemFree，
+  // 而 MemFree 是内核空闲页（示例：64MB/4GB），不含可回收缓存。用它算「已用」
+  // 会得出 97% 这种假警报——实测同一时刻 os.freemem() 报 3447MB 空闲（18% 已用），
+  // 两者差 80 个百分点。用错指标会让负载闸把每一次派活都拒掉，等于功能全禁。
+  // 所以：MemAvailable 拿不到时，退回 os.freemem()，**绝不用 MemFree**。
   try {
     const text = fs.readFileSync('/proc/meminfo', 'utf8');
-    const get = (k) => {
+    const field = (k) => {
       const m = new RegExp(`^${k}:\\s+(\\d+)\\s+kB`, 'm').exec(text);
       return m ? Number(m[1]) : null;
     };
-    const total = get('MemTotal');
-    const avail = get('MemAvailable') ?? get('MemFree');
-    if (!total || avail === null) return null;
+    const total = field('MemTotal');
+    const available = field('MemAvailable');
+    if (total && available !== null) {
+      return {
+        totalMB: Math.round(total / 1024),
+        freeMB: Math.round(available / 1024),
+        usedRatio: 1 - available / total,
+        source: 'meminfo:MemAvailable',
+      };
+    }
+    // 退路：Node 的 freemem（iOS 上是真实值）
+    const totalBytes = os.totalmem();
+    const freeBytes = os.freemem();
+    if (!totalBytes) return null;
     return {
-      totalMB: Math.round(total / 1024),
-      freeMB: Math.round(avail / 1024),
-      usedRatio: 1 - avail / total,
+      totalMB: Math.round(totalBytes / 1048576),
+      freeMB: Math.round(freeBytes / 1048576),
+      usedRatio: 1 - freeBytes / totalBytes,
+      source: 'os.freemem',
     };
-  } catch { return null; }
+  } catch {
+    const totalBytes = os.totalmem();
+    const freeBytes = os.freemem();
+    if (!totalBytes) return null;
+    return {
+      totalMB: Math.round(totalBytes / 1048576),
+      freeMB: Math.round(freeBytes / 1048576),
+      usedRatio: 1 - freeBytes / totalBytes,
+      source: 'os.freemem',
+    };
+  }
 }
 
 /** /proc/stat 第一行累计 tick；返回 {idle, total}。 */
@@ -77,6 +107,8 @@ export async function sample() {
     mem: Number((mem.usedRatio * 100).toFixed(1)),
     totalMB: mem.totalMB,
     freeMB: mem.freeMB,
+    // 数据来源要透出：MemFree 与 os.freemem 差 80 个百分点，排查时第一眼看这个。
+    source: mem.source,
   };
 }
 
