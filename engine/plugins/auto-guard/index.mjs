@@ -18,6 +18,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import { parentPort } from 'node:worker_threads';
 import { scanInjection } from '../../runtime/injection-guard.mjs';
@@ -99,6 +100,29 @@ const EXTERNAL_CONTENT_TOOLS = /^(web_fetch|web_search|fetch|browser|curl|wget|m
 
 function sessionId(session) {
   return String(session?.header?.id ?? session?.id ?? 'unknown');
+}
+
+/**
+ * 按需加载 Dream 相关模块。
+ *
+ * 为什么不在顶层 import：这些模块会连带加载 skill-eval / memory-store，
+ * 而 memory-store 又去 require meow-memory（一个大包）。顶层加载会让
+ * 插件启动变慢，而 Dream 十分钟才可能跑一次——不值得为它付启动成本。
+ */
+function requireDream() {
+  if (!globalThis.__dreamMods) {
+    const req = createRequire(import.meta.url);
+    globalThis.__dreamMods = req('../../runtime/dream.mjs');
+  }
+  return globalThis.__dreamMods;
+}
+
+function requireMemoryStore() {
+  if (!globalThis.__memoryStoreMod) {
+    const req = createRequire(import.meta.url);
+    globalThis.__memoryStoreMod = req('../../runtime/memory-store.mjs');
+  }
+  return globalThis.__memoryStoreMod;
 }
 
 /**
@@ -332,6 +356,9 @@ export default class AutoGuard {
     // 任务表：把 outbox 里还没投递的通知发出去。
     // 任务状态本身由 Router/调用方通过 task-registry 写，这里只负责「不丢消息」。
     this.flushTaskOutbox(session);
+
+    // Dream：攒够 trace 就整理一次（10 分钟最多检查一次）。
+    this.maybeDream();
   }
 
   /**
@@ -407,6 +434,63 @@ export default class AutoGuard {
   ledgerFile() {
     return process.env.DSH_SENTINEL_LEDGER
       || path.join(process.env.DSH_IOS_DATA || process.cwd(), '.sentinel.jsonl');
+  }
+
+  /**
+   * 把 task registry 的 outbox 投递到提醒通道，并 ack。
+   *
+   * 为什么放在每轮：没有常驻定时器的 iOS 环境里，轮次是唯一可靠的节拍。
+   * 代价是 outbox 里的消息最多晚一轮才送达——比丢了好。
+   */
+  flushTaskOutbox(session) {
+    try {
+      const state = loadTasks(this.dataDir());
+      const pending = pendingOutbox(state);
+      if (!pending.length) return;
+      for (const event of pending.slice(0, 5)) {   // 一次最多 5 条，避免刷屏
+        // eventId 跟着走：main.mjs 透传进 notices.jsonl，App 按 id 去重。
+        this.notify(event.message, {
+          ...(event.detail ?? {}),
+          eventId: event.eventId,
+          kind: event.kind,
+          taskId: event.taskId,
+          session: sessionId(session),
+        });
+        ackTaskEvent(state, event.eventId);
+      }
+      saveTasks(state, this.dataDir());
+    } catch (error) {
+      try { this.ctx.logger?.warn?.('[auto-guard] task outbox 投递失败: %s', error?.message ?? error); } catch { /* 无 logger */ }
+    }
+  }
+
+  /**
+   * 每轮顺手看一眼该不该跑 Dream。
+   *
+   * 为什么挂在这里：iOS 上没有常驻定时器，App 一被挂起就停。轮次是唯一
+   * 可靠的节拍——用户每说一句话就检查一次，攒够了就整理。
+   *
+   * 代价：只有用户在用时才会整理。对单机 App 这是物理限制，不是设计选择。
+   * 真正的定时整理要 Phase 3 的常驻 Hub。
+   */
+  maybeDream() {
+    const now = Date.now();
+    if (now - (this.lastDreamCheck ?? 0) < 10 * 60_000) return;   // 10 分钟最多看一次
+    this.lastDreamCheck = now;
+    try {
+      const { shouldRun, runDream } = requireDream();
+      if (!shouldRun(this.dataDir()).shouldRun) return;
+
+      const { createMemoryStore, workspaceFromEnv } = requireMemoryStore();
+      const store = createMemoryStore(workspaceFromEnv());
+      if (!store.available) return;    // 记忆库不可用就别跑，跑了也留不下东西
+
+      const r = runDream(this.dataDir(), { store });
+      store.close();
+      if (r.ran && r.stored > 0) {
+        this.ctx.logger?.info?.(`[auto-guard] Dream 整理完成：落库 ${r.stored} 条技能记忆`);
+      }
+    } catch { /* 整理失败不影响对话 */ }
   }
 
   /**
