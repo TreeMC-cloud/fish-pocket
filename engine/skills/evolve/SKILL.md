@@ -1,6 +1,10 @@
 ---
 name: evolve
 description: 记录干过什么、从失败里提炼经验。插件每轮自动记账；复盘或想查踩过的坑时手动跑。
+version: 1.0.0
+source: handwritten
+permissions: [writes-files]
+
 ---
 
 # 经验沉淀
