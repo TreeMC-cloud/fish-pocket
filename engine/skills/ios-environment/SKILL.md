@@ -1,7 +1,6 @@
 ---
 name: ios-environment
-description: iOS 上没有真正的 Unix 系统，很多命令不存在。不确定某个 shell 命令能不能用、命令失败了、或者要写/改 DSH 插件之前，先读这个技能。
-whenToUse: 某个 shell 命令报「not found」、要写 DSH 插件、或者不确定 iOS 上能干什么
+description: iOS 没有真正的 Unix，很多命令不存在。shell 报 not found、要写 DSH 插件、不确定能干什么时先读。
 ---
 
 # Working on iOS
