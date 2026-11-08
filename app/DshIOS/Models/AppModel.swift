@@ -134,6 +134,9 @@ final class AppModel {
     var openRequest: (id: String, token: UUID)?
     /// A credential step to open (set through `requestCredentials`; the root view consumes it).
     var credentialRequest: (step: CredentialStep, token: UUID)?
+    /// 快捷胶囊选了某个场景模板（对应 engine/skills/scene/panel.mjs 的键）。
+    /// 发送时拼进消息前缀，AI 就按那个场景组织面板，不用用户自己说。
+    var pendingSceneHint: String?
     /// The session in the main view, kept by the root view (unread completions skip it).
     var currentSession: String? { didSet { if let currentSession { completionUnread.remove(currentSession) } } }
     /// Sessions whose turn finished while they were not open (the web's completion reminder).
