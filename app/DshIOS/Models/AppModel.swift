@@ -118,6 +118,16 @@ final class AppModel {
     /// a question that has already continued; plan review only ever arrives here).
     private(set) var questionRequests: [String: [QuestionRequest]] = [:]
     var lastError: String?
+    /// 被引擎重启打断的会话 → 提示文案。
+    /// 存这里而不是 SessionModel：通知到达时那个会话多半还没打开，
+    /// 模型实例还不存在；等用户点进去时再取。
+    private(set) var interrupted: [String: String] = [:]
+
+    /// 取走某会话的中断提示（取一次就清，横幅关掉后不再出现）。
+    func takeInterrupted(_ id: String) -> String? {
+        interrupted.removeValue(forKey: id)
+    }
+
     /// The single shell toast (S-128): a newer one replaces the current one.
     private(set) var toast: Toast?
     /// Raised each time an ask for a Star or a share is due.
@@ -270,6 +280,11 @@ final class AppModel {
                     // 自动再来一遍比不跑更危险，让用户自己看过后决定。
                     if obj["kind"] as? String == "interrupted" {
                         let sessions = (obj["sessions"] as? [String]) ?? []
+                        // 按会话记下来：用户点进去时那一条消息顶上会挂一条横幅，
+                        // 告诉他「上一条任务在这儿断了」。只记一次，看过就清。
+                        for id in sessions {
+                            self.interrupted[id] = message
+                        }
                         let first = sessions.first
                         self.showToast(message, tone: .plain, actions: first.map { id in
                             [Toast.Action(label: String(localized: "去查看")) { [weak self] in
