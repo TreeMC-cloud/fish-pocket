@@ -145,3 +145,31 @@ test('history 只保留最近 50 条，防止无限膨胀', () => {
   }
   assert.ok(a.state.tasks[id].history.length <= 50, `history 应被截断，实际 ${a.state.tasks[id].history.length}`);
 });
+
+// ── 版本与迁移（Phase 1/2 规范要求）────────────────────────
+
+test('没有 schemaVersion 的旧文件能正常读（按 v1 处理）', () => {
+  const dir = tmp();
+  fs.writeFileSync(path.join(dir, 'tasks.json'),
+    JSON.stringify({ seq: 3, tasks: { a: { taskId: 'a', title: 'T' } }, outbox: [] }));
+  const state = load(dir);
+  assert.equal(state.tasks.a.title, 'T');
+  assert.equal(state.seq, 3);
+});
+
+test('文件版本比代码新时拒绝加载，不静默按旧格式读', () => {
+  const dir = tmp();
+  fs.writeFileSync(path.join(dir, 'tasks.json'),
+    JSON.stringify({ schemaVersion: 99, seq: 0, tasks: {}, outbox: [] }));
+  assert.throws(() => load(dir), /版本 99.*比当前代码支持的/,
+    '降级安装时必须报错，否则会按错误理解改数据');
+});
+
+test('坏 JSON 会先备份再当空处理，不丢原始数据', () => {
+  const dir = tmp();
+  fs.writeFileSync(path.join(dir, 'tasks.json'), '{broken');
+  const state = load(dir);
+  assert.deepEqual(state.tasks, {});
+  const backups = fs.readdirSync(dir).filter((f) => f.includes('corrupt'));
+  assert.equal(backups.length, 1, '必须留一份原始文件');
+});
