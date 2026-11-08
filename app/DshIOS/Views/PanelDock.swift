@@ -100,7 +100,7 @@ enum PanelDockPicker {
     /// 不在这里做缓存：这个函数在 `body` 里调用，缓存必须跟着会话走，
     /// 放成 static 会让 A 会话的面板漏到 B 会话。调用方用 `@State` 持有一份，
     /// 并在 `items.last?.id` 变化时重算（见 ConversationView）。
-    static func latest(in items: [Timeline.Item]) -> (node: JSON, title: String, id: String)? {
+    static func latest(in items: [TimelineItem]) -> (node: JSON, title: String, id: String)? {
         for item in items.reversed() {
             guard case .assistant(_, let blocks, _, _) = item else { continue }
             for block in blocks.reversed() {
@@ -116,6 +116,9 @@ enum PanelDockPicker {
     }
 
     /// 从 Markdown 里抠出第一个 ```schemaJson 块。和 MarkdownView 的判据保持一致。
+    ///
+    /// 注意：前面的代码块（python / bash 之类）**不能直接放弃**——一次回复里经常先贴一段
+    /// 命令再给面板，遇到非 schemaJson 的围栏要跳过并继续往下找。
     static func firstSchemaBlock(in text: String) -> String? {
         var inBlock = false
         var buffer: [String] = []
@@ -126,8 +129,7 @@ enum PanelDockPicker {
                     return buffer.joined(separator: "\n")
                 } else {
                     let language = String(trimmed.dropFirst(3)).trimmingCharacters(in: .whitespaces)
-                    guard language == "schemaJson" else { return nil }
-                    inBlock = true
+                    inBlock = (language == "schemaJson")
                     buffer = []
                 }
                 continue
