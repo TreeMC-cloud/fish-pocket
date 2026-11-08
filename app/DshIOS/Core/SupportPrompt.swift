@@ -54,7 +54,7 @@ enum AppLinks {
     /// The App Store once it answers for the app, the public beta until then.
     static var shareText: String {
         let download = UpdateChecker.shared.storePage ?? testFlight
-        return String(localized: "Fish Pocket：在 iPhone 和 iPad 上本机运行 DeepSeek Harness，不连电脑，不连服务器。\n下载：\(download.absoluteString)\nGitHub：\(repository.absoluteString)")
+        return String(localized: "Sigma：在 iPhone 和 iPad 上本机运行 DeepSeek Harness，不连电脑，不连服务器。\n下载：\(download.absoluteString)\nGitHub：\(repository.absoluteString)")
     }
 
     /// The share sheet, from where SwiftUI can't start one (`ShareLink` needs its own tap).
