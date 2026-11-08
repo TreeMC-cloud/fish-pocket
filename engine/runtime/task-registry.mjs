@@ -90,8 +90,36 @@ function emptyState() {
  *   - 版本更高（文件比代码新，说明降级了）→ **拒绝加载并抛出**，
  *     宁可让用户看到错误，也不要按错误的理解去改数据
  */
+/**
+ * 最近一次读到的任务表，按文件状态校验。
+ *
+ * 为什么要这个：`router.runOne` 每个任务要调 2-3 次 `state()`，也就是 2-3 次
+ * `load()`——每次完整读文件 + JSON.parse。20 个任务就是 40-60 次读盘，
+ * 而且文件随任务数变大，读得越来越慢，是 O(n²)。
+ * 实测调度底噪 130ms 里绝大部分是这部分。
+ *
+ * 为什么用 mtime+size 而不是只认内存：CLI（task-registry.mjs 的 list/show）
+ * 和别的进程也会写这个文件，只信内存会读到陈旧状态。
+ * 文件系统时间戳精度到秒级时，同一秒内两次不同大小仍能被 size 分辨。
+ */
+const cache = { file: null, key: null, state: null };
+
+function fileKey(file) {
+  try {
+    const st = fs.statSync(file);
+    return `${st.mtimeMs}:${st.size}`;
+  } catch {
+    return null;
+  }
+}
+
 export function load(dataDir) {
   const file = registryPath(dataDir);
+  const key = fileKey(file);
+  if (key && cache.file === file && cache.key === key && cache.state) {
+    return cache.state;
+  }
+
   let raw;
   try {
     raw = fs.readFileSync(file, 'utf8');
@@ -121,13 +149,18 @@ export function load(dataDir) {
 
   const migrated = version < SCHEMA_VERSION ? migrate(parsed, version) : parsed;
 
-  return {
+  const state = {
     schemaVersion: SCHEMA_VERSION,
     seq: Number.isInteger(migrated.seq) ? migrated.seq : 0,
     tasks: migrated.tasks ?? {},
     idempotency: migrated.idempotency ?? {},
     outbox: Array.isArray(migrated.outbox) ? migrated.outbox : [],
   };
+  // 存进缓存：下一次同文件同时间戳的 load 直接返回，不再读盘解析。
+  cache.file = file;
+  cache.key = fileKey(file);
+  cache.state = state;
+  return state;
 }
 
 /**
@@ -154,6 +187,11 @@ export function save(state, dataDir) {
     try { fs.rmSync(tmp, { force: true }); } catch { /* 清理失败无所谓 */ }
     throw new TaskError(`任务表写入失败：${error.message}`, 'io');
   }
+  // 写完更新缓存：接下来同一进程里的 load 不必再读一遍刚写下的文件。
+  // 只在这个 file 上生效，别的 dataDir 互不干扰。
+  cache.file = file;
+  cache.key = fileKey(file);
+  cache.state = state;
 }
 
 /** 幂等键：来源 + 事件 id。缺一个就退化成标题哈希（仍能防重复标题的重投）。 */
