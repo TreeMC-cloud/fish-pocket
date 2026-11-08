@@ -21,6 +21,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const DATA = process.env.DSH_IOS_DATA || process.cwd();
 const TRACE_FILE = process.env.DSH_TRACE_FILE || path.join(DATA, '.trace.jsonl');
@@ -158,16 +159,44 @@ function cmdDistill(argv) {
     return 0;
   }
 
-  const existing = new Set(readJsonl(CAND_FILE).map((c) => c.tag));
+  const existing = new Set(readJsonl(CAND_FILE).flatMap((c) => (c.fingerprint ? [c.tag, c.fingerprint] : [c.tag])));
   let added = 0;
+  let skipped = 0;
   for (const c of candidates) {
-    if (existing.has(c.tag)) continue;   // 同一个 tag 不重复产出
+    // 指纹由「话题 + 失败模式」算出：同样的证据产出同一条指纹。
+    // 只用 tag 去重不够——同一个话题在不同阶段会踩不同的坑，
+    // 按 tag 挡掉会漏掉新问题；而不挡又会把同一件事反复堆进候选表。
+    c.fingerprint = fingerprintOf(c);
+    if (existing.has(c.tag) || existing.has(c.fingerprint)) { skipped += 1; continue; }
     appendJsonl(CAND_FILE, c);
+    existing.add(c.fingerprint);
     added += 1;
   }
-  console.log(`✓ 产出 ${added} 条候选技能（共 ${candidates.length} 条够格，其余已存在）`);
+  console.log(`✓ 产出 ${added} 条候选技能（共 ${candidates.length} 条够格，${skipped} 条已存在）`);
   console.log('注意：候选的 verified 都是 false，看过确认后再手动置 true 才会被当成真技能。');
   return 0;
+}
+
+/**
+ * 候选的稳定指纹：话题 + 归一化后的失败描述。
+ *
+ * 归一化只做「去标点、去空白、小写」——不能做得更聪明（比如取关键词），
+ * 因为那会让不同的坑算出同一指纹，反而把新问题挡掉。
+ * 目标是「同一次证据重跑得到同一个指纹」，不是「语义相似也算同一条」。
+ */
+export function fingerprintOf(candidate) {
+  const normalize = (s) => String(s ?? '')
+    .toLowerCase()
+    .replace(/[\s\p{P}\p{S}]+/gu, '')
+    .slice(0, 120);
+  const raw = `${candidate.tag ?? ''}|${normalize(candidate.problem)}`;
+  // 短哈希足够：候选表是小文件，不需要抗碰撞；但要稳定（不依赖时间/随机）。
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < raw.length; i += 1) {
+    hash ^= raw.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return `fp${hash.toString(16).padStart(8, '0')}`;
 }
 
 // ── list ──────────────────────────────────────────────────────────────
@@ -200,11 +229,19 @@ function cmdList(argv) {
 }
 
 // ── 入口 ──────────────────────────────────────────────────────────────
+//
+// 只有直接运行时才解析参数并退出。被 import 时（测试、插件）必须什么都不做——
+// 否则 `process.exit(2)` 会让导入方整个进程退出，看起来像断言失败。
+// load-gate.mjs 踩过同一个坑，这是第二处。
+const invokedDirectly = process.argv[1]
+  && pathToFileURL(process.argv[1]).href === import.meta.url;
 
-const [, , cmd, ...rest] = process.argv;
-const table = { record: cmdRecord, distill: cmdDistill, list: cmdList };
-if (!table[cmd]) {
-  console.error('用法: trace.mjs <record|distill|list> [参数]');
-  process.exit(2);
+if (invokedDirectly) {
+  const [, , cmd, ...rest] = process.argv;
+  const table = { record: cmdRecord, distill: cmdDistill, list: cmdList };
+  if (!table[cmd]) {
+    console.error('用法: trace.mjs <record|distill|list> [参数]');
+    process.exit(2);
+  }
+  process.exit(table[cmd](rest));
 }
-process.exit(table[cmd](rest));
