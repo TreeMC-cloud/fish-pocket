@@ -251,7 +251,31 @@ struct ComposerView: View {
                 CandidatePanel(model: model, context: context, hit: trigger, pick: { pick($0, over: trigger) }, showAll: { refocus = true; browsing = trigger })
             }
             field
-                .background(Palette.field, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+                // 输入条是液态玻璃的典型落点：它浮在对话内容之上，
+                // 玻璃的透光正好让下滚的消息隐约透出来（iOS 26 的输入条就是这个观感）。
+                .background {
+                    if #available(iOS 26.0, *) {
+                        Color.clear
+                    } else {
+                        RoundedRectangle(cornerRadius: 28, style: Glass.corner)
+                            .fill(.thinMaterial)
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 28, style: Glass.corner)
+                                    .strokeBorder(
+                                        LinearGradient(
+                                            colors: [.white.opacity(0.30), .white.opacity(0.06), .black.opacity(0.06)],
+                                            startPoint: .top,
+                                            endPoint: .bottom
+                                        ),
+                                        lineWidth: 0.5
+                                    )
+                            }
+                    }
+                }
+                .glassSurface(
+                    RoundedRectangle(cornerRadius: 28, style: Glass.corner),
+                    .floating
+                )
         }
         .task(id: pendingDraft) {
             guard let pendingDraft else { return }
