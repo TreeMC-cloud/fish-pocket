@@ -1030,8 +1030,15 @@ struct AssistantTurnView: View {
     @State private var choice: Bool?
     @Environment(\.conversationActions) private var actions
 
+    /// 运行中不再强制展开步骤。
+    ///
+    /// 为什么改：原来 `inProgress` 就算在 `stayOpen` 里，等于「只要在跑就把所有工具行
+    /// 铺开」——一次任务几十个工具调用，小白看到的是一屏看不懂的技术行，真正的进展
+    /// 反而被淹没。现在默认收起，只留顶部一句「正在读取文件」，要细节点一下展开。
+    ///
+    /// 异常结束仍然展开：被中断或出错时，用户需要知道到底哪一步出的问题。
     private var stayOpen: Bool {
-        inProgress || info?.steered == true || ["aborted", "interrupted", "error"].contains(info?.closedKind ?? "")
+        info?.steered == true || ["aborted", "interrupted", "error"].contains(info?.closedKind ?? "")
     }
 
     var body: some View {
@@ -1068,6 +1075,13 @@ struct AssistantTurnView: View {
                     }
                     .padding(.leading, 12)
                     .overlay(alignment: .leading) { Rectangle().fill(Palette.stroke).frame(width: 2) }
+                } else if finalStart > 0 {
+                    // 收起时不再什么都不留：给一句「做了 N 步」，让人知道底下有东西、
+                    // 点开能看。完全藏起来会让人以为这轮什么都没做。
+                    Text(workHint)
+                        .font(.caption)
+                        .foregroundStyle(Palette.faint)
+                        .padding(.leading, 2)
                 }
             }
             ForEach(Array(blocks.enumerated().dropFirst(finalStart)), id: \.element.id) { index, block in
@@ -1113,17 +1127,26 @@ struct AssistantTurnView: View {
         blocks.compactMap { if case .tool(let call) = $0 { return call }; return nil }
     }
 
+    /// 收起时那行小字：「做了 12 步，点开看」。没有工具调用就不显示。
+    private var workHint: String {
+        let count = blocks.prefix(finalAnswerStart).reduce(into: 0) { total, block in
+            if case .tool = block { total += 1 }
+        }
+        return count == 0 ? "" : String(localized: "做了 \(count) 步，点开看")
+    }
+
     private var summaryLine: String {
         if inProgress {
-            // As the web: the running tool, else the reasoning streaming, else the model is on its next step.
+            // 运行中只说一句大白话，不再拼接工具参数、命令内容、文件路径。
+            // 为什么要砍：原来这里是「正在运行命令 · grep -rn 'xxx' app/DshIOS/ ...」，
+            // 每跑一个工具就整行换一次，小白看到的是满屏乱跳的技术串。
+            // 现在只按「在干什么」分类给一句，跳变少了，也看得懂。
             if case .tool(let call)? = blocks.prefix(finalAnswerStart).last, !call.finished {
-                let kind = StepKind(tool: call.name)
-                let streaming = isLive(finalAnswerStart - 1)
-                return [streaming ? kind.preparing : kind.running, call.summary].filter { !$0.isEmpty }.joined(separator: " · ")
+                return StepKind(tool: call.name).running
             }
             if case .reasoning(_, let text)? = blocks.last, liveCount > 0 {
                 let summary = ReasoningSummary.make(text, live: true)
-                if !summary.isEmpty { return summary }
+                if !summary.isEmpty { return StepKind.thinking.running }
             }
             return StepKind.thinking.running
         }
