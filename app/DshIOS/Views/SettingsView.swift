@@ -60,6 +60,7 @@ struct SettingsView: View {
             List {
                 if !engineRunning {
                     Section { EngineCard() }
+                    .groupedRow()
                         .listRowBackground(Palette.grouped)
                         .listRowInsets(EdgeInsets(top: 18, leading: 18, bottom: 18, trailing: 18))
                 }
