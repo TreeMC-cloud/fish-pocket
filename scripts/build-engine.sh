@@ -76,8 +76,16 @@ rm -rf "$nm"/node-liblzma
 # skills/ 下的 .md 必须留：dsh-plugin-recommendations 和 dsh-creation-recommendations
 # 在运行时用 readFile(new URL('../skills/xxx.md')) 读它当提示词，删了这两个插件就废
 # （真机教训：这是 *.md 剪枝里唯一有运行时语义的一类）。
+#
+# prompts/ 下的 .md 同理，而且更致命：meow-memory 的 prompt-loader 在**模块初始化**
+# 里读 lib/prompts/{lang}/{slot}.md（11 个槽位：system-guide / reflect / dream-* /
+# labels / tools…）。文件不在 → readFileSync 抛 ENOENT → 整个插件 "did not activate"，
+# 表现出来是「记忆功能配了但会话里没有 memory_* 工具」，且只有启动日志里一行
+# "ENOENT ... lib/prompts/zh/tools.md"。原版包里这 34 个 md 是随包发布的，
+# 被这里的 *.md 剪枝当成文档删掉了。
 find "$nm" -type f \( -name '*.map' -o -name '*.d.ts' -o -name '*.d.mts' -o -name '*.d.cts' -o -name '*.md' -o -name '*.markdown' \) \
-  ! -iname 'licen[cs]e*' ! -iname 'notice*' ! -iname 'copying*' ! -path "$nm/*/skills/*" -delete
+  ! -iname 'licen[cs]e*' ! -iname 'notice*' ! -iname 'copying*' \
+  ! -path "$nm/*/skills/*" ! -path "$nm/*/prompts/*" -delete
 find "$nm" -type d \( -name test -o -name tests -o -name __tests__ -o -name docs -o -name example -o -name examples \) -prune -exec rm -rf {} +
 # Any remaining Mach-O would fail App Store validation and cannot load anyway.
 { find "$nm" -type f -size +1k -print0 | xargs -0 file --mime-type 2>/dev/null | grep -E 'application/x-(mach-binary|executable|sharedlib)' || true; } | cut -d: -f1 | while read -r f; do rm -f "$f"; done
