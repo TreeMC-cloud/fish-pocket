@@ -1,6 +1,10 @@
 ---
 name: scene
 description: 当前在哪个项目、用什么身份和规矩。开始一项工作前确定场景，别把两个项目的约定混着用。
+version: 1.0.0
+source: handwritten
+permissions: [writes-files]
+
 ---
 
 # 场景 = 工作区
