@@ -333,11 +333,20 @@ struct DrawerGlyph: Shape {
 struct DrawerButton: View {
     let action: () -> Void
 
+    // 原来是纯抽屉图标——一眼看不出这是哪个 App，也看不出背后是谁。
+    // 现在做成「Σ + 抽屉线」的组合：Σ 是身份（Sigma），线条保留"这里有侧边栏"的既有语义。
+    // 尺寸维持 22×22，不改变导航栏高度，也不影响右侧按钮的排布。
     var body: some View {
         Button(action: action) {
-            DrawerGlyph()
-                .stroke(Palette.ink, style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
-                .frame(width: 22, height: 22)
+            HStack(spacing: 3) {
+                Text("Σ")
+                    .font(.system(size: 17, weight: .semibold, design: .default))
+                    .foregroundStyle(Palette.ink)
+                DrawerGlyph()
+                    .stroke(Palette.secondary, style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
+                    .frame(width: 15, height: 15)
+            }
+            .frame(height: 22)
         }
         .accessibilityLabel("打开侧边栏")
     }
