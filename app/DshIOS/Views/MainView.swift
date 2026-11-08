@@ -16,6 +16,8 @@ struct MainView: View {
     @AppStorage("dsh.currentWorkspace") private var workspaceId = ""
     @State private var selection: String?
     @State private var sheet: Sheet?
+    /// 引擎叫我们弹的预览（网页/图片）。
+    @State private var previewItem: PreviewItem?
     /// The sidebar, in regular width.
     @State private var sidebar = NavigationSplitViewVisibility.all
     @State private var windowWidth: CGFloat = 0
@@ -132,6 +134,23 @@ struct MainView: View {
             if let target { workspaceId = target.id }
             newConversation(in: target, agentPreset: request.agentPreset, draft: request.draft)
             setDrawer(false)
+        }
+        // 引擎做好了网页/图片（`dsh-ios/preview`）→ 直接在 App 里弹出来，
+        // 不让用户复制地址去找浏览器。
+        .onChange(of: app.previewRequest?.token) { _, token in
+            guard token != nil, scenePhase != .background, let request = app.previewRequest else { return }
+            app.previewRequest = nil
+            previewItem = PreviewItem(url: request.url, title: request.title)
+        }
+        .sheet(item: $previewItem) { item in
+            // 用现成的文件预览表：它已经处理了文本/图片/网页/PDF 全部分支。
+            // sessionId 传当前选中的会话（只用于「在文件树里定位」，可空）。
+            FilePreviewSheet(
+                sessionId: selection ?? "",
+                path: item.url.path,
+                root: nil,
+                lines: nil
+            )
         }
         .onChange(of: app.credentialRequest?.token) { _, token in
             guard token != nil, scenePhase != .background, let step = app.credentialRequest?.step else { return }
