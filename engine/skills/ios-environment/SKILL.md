@@ -1,6 +1,10 @@
 ---
 name: ios-environment
 description: iOS 没有真正的 Unix，很多命令不存在。shell 报 not found、要写 DSH 插件、不确定能干什么时先读。
+version: 1.0.0
+source: handwritten
+permissions: [read-only]
+
 ---
 
 # Working on iOS
