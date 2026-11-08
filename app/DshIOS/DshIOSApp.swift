@@ -177,7 +177,7 @@ private struct EngineTrouble: View {
         let version = info?["CFBundleShortVersionString"] as? String ?? "—"
         let build = info?["CFBundleVersion"] as? String ?? "—"
         var lines = [
-            "Fish Pocket \(version) (\(build))",
+            "Sigma \(version) (\(build))",
             "\(deviceModel()) · iOS \(UIDevice.current.systemVersion)",
             headline,
         ]
