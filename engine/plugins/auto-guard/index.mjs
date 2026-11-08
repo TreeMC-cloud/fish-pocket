@@ -10,16 +10,14 @@
  *   3. tools/post-execute → 派活后自动记账（谁派的、干什么），失败自动记
  *   4. compaction/start  → 上下文要压缩，提醒写交接
  *
- * 设计原则：
- *   - 默认只提醒不阻断；只有「明显会搞坏东西」才拒绝（比如内存 <10% 还派子 agent）
- *   - 状态只留内存，不落盘。重启丢失可接受：这些是「这一轮要不要提醒」，
- *     长期记忆归 HANDOFF.md
- *   - 报警不进模型上下文（那等于每轮多付 token，正好违反 cost-guard 自己）
+ * 提醒先写引擎日志，再由宿主准入器决定是否进入 App toast；重复提醒有冷却，
+ * 所以不是每条内部告警都会打断用户。
  */
 
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { writeInFlight } from '../../runtime/flight-recorder.mjs';
 
 const DEFAULT_TURNS_MAX = 40;
 const DEFAULT_REPEAT_MAX = 3;
@@ -29,6 +27,10 @@ const MEMORY_STOP_RATIO = 0.10;
 const MEMORY_WARN_RATIO = 0.20;
 /** 这些工具名说明"在派活"，派之前要查负载、派之后要记账。 */
 const DISPATCH_TOOL_PATTERN = /^(subagent|wb_submit_task|wb_task_status)$/;
+
+function sessionId(session) {
+  return String(session?.header?.id ?? session?.id ?? 'unknown');
+}
 
 /** 追加一行 JSON。写失败不抛 —— 记账是副产物，坏了不该影响对话。 */
 function appendJsonl(file, obj) {
@@ -77,6 +79,14 @@ export default class AutoGuard {
     this.state = new WeakMap();
     /** 派单台账：进程内记账，重启清空（持久台账归 sentinel.mjs）。 */
     this.dispatched = [];
+    /**
+     * 正在跑的会话 → 开始时间。每次变化覆盖写 in-flight.json，
+     * 这份文件跨进程存活：崩溃后残留的内容就是「被打断的任务」。
+     *
+     * 不从文件里读回旧值（那会把上次崩溃的记录当成本次在跑），
+     * 读取与清理由 main.mjs 在启动新引擎之前完成。
+     */
+    this.inFlight = new Map();
 
     ctx.effect(() => {
       const offs = [
@@ -151,9 +161,25 @@ export default class AutoGuard {
     }
   }
 
+  /** 数据目录：与 main.mjs、turns/trace 同一口径。 */
+  dataDir() {
+    return process.env.DSH_IOS_DATA || process.cwd();
+  }
+
+  /** 在跑集合变了就覆盖写一次。写失败不影响对话。 */
+  persistInFlight() {
+    try {
+      writeInFlight(this.dataDir(), Object.fromEntries(this.inFlight));
+    } catch { /* 飞行记录是副产物 */ }
+  }
+
   onTurnStart(session) {
     const s = this.runtime(session);
     s.turns += 1;
+
+    // 飞行记录：这一轮开始跑了。崩溃时这个条目会留在 in-flight.json 里。
+    this.inFlight.set(sessionId(session), Date.now());
+    this.persistInFlight();
 
     // 落盘记一笔 —— 这是 cost-guard 那条闭环的开关。
     //
@@ -169,7 +195,7 @@ export default class AutoGuard {
       this.notify(
         `会话已 ${s.turns} 轮，超过 ${this.turnsMax} 轮红线。` +
         '该考虑换会话了：先把进度写进 HANDOFF.md（下一步要具体），再开新会话。',
-        { kind: 'turns', turns: s.turns },
+        { kind: 'turns', turns: s.turns, session: sessionId(session) },
       );
     }
   }
@@ -194,7 +220,7 @@ export default class AutoGuard {
         at: Date.now(),
         turns,
         tokens: 0,
-        session: String(session?.id ?? ''),
+        session: sessionId(session),
       }) + '\n';
       fs.appendFileSync(file, line, { mode: 0o600 });
     } catch (error) {
@@ -216,6 +242,11 @@ export default class AutoGuard {
    */
   onTurnEnd(session, event) {
     try {
+      // 飞行记录：这一轮结束了，把它从在跑集合里摘掉。
+      // 放在 try 最前面：即使后面 trace 写失败，也必须先销账。
+      this.inFlight.delete(sessionId(session));
+      this.persistInFlight();
+
       const s = this.runtime(session);
       const reason = event?.data?.reason?.kind;
       // 记忆插件自己发的内省轮次不算工作，记进来会污染统计。
@@ -280,7 +311,7 @@ export default class AutoGuard {
 
     // 派活：自动记账，不用 Agent 记得去调 sentinel.mjs
     if (DISPATCH_TOOL_PATTERN.test(name) && !failed) {
-      this.dispatched.push({ tool: name, at: Date.now(), session: String(session?.id ?? '') });
+      this.dispatched.push({ tool: name, at: Date.now(), session: sessionId(session) });
       // 只留最近 50 条，避免无限长
       if (this.dispatched.length > 50) this.dispatched.shift();
     }
@@ -298,7 +329,7 @@ export default class AutoGuard {
         this.notify(
           `工具 ${name} 连续失败 ${s.repeat} 次。别再用同样的参数硬重试——` +
           '先看错误到底说什么，或者换个思路；实在不行问用户。',
-          { kind: 'repeat', tool: name, count: s.repeat },
+          { kind: 'repeat', tool: name, count: s.repeat, session: sessionId(session) },
         );
       }
     } else {
@@ -314,7 +345,7 @@ export default class AutoGuard {
     this.notify(
       '上下文即将压缩。如果这一轮有值得留下的结论，现在写进 HANDOFF.md——' +
       '压缩之后这些内容就不在上下文里了。',
-      { kind: 'compaction' },
+      { kind: 'compaction', session: sessionId(session) },
     );
   }
 
