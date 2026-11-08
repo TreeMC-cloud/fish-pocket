@@ -233,12 +233,20 @@ struct MainView: View {
             Text("充值后才能开始新会话，也可稍后在「设置 → 账号与余额」充值。")
         }
         .onChange(of: app.lastError) { _, error in if error != nil { Haptics.error() } }
-        .alert("出错了", isPresented: Binding(get: { app.lastError != nil }, set: { if !$0 { app.lastError = nil } })) {
+        .alert("出错了", isPresented: lastErrorPresented) {
             Button("好", role: .cancel) {}
         } message: {
             Text(app.lastError ?? "")
         }
         .environment(\.openSession) { open(session: $0) }
+    }
+
+    /// 「出错了」弹窗的开关。抽成属性避免类型推断超时。
+    private var lastErrorPresented: Binding<Bool> {
+        Binding(
+            get: { app.lastError != nil },
+            set: { shown in if !shown { app.lastError = nil } }
+        )
     }
 
     // MARK: Credentials
