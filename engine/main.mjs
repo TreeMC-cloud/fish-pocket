@@ -127,6 +127,24 @@ function start() {
     if (message?.type === 'dsh-ios/notice') {
       console.warn(`[auto-guard] ${message.level ?? 'info'}: ${message.message ?? ''}`);
     }
+    // 引擎里做的网页/文件想让用户在 App 里直接看：写一条 kind=preview 的通知。
+    // 为什么走这个通道而不是新开一条 RPC：notices.jsonl 已经是引擎到 App 的现成
+    // 单向通道（App 每 3 秒读一次），复用只多一个字段，不用改两边的协议。
+    if (message?.type === 'dsh-ios/preview') {
+      const path = message.path;
+      if (typeof path === 'string' && path.length > 0) {
+        const record = { kind: 'preview', title: message.title ?? '', path, time: Date.now() };
+        try {
+          fs.appendFileSync(
+            path.join(data, 'notices.jsonl'),
+            JSON.stringify(record) + '\n',
+            { mode: 0o600 },
+          );
+        } catch (error) {
+          console.error('[dsh-ios] preview notice failed', error?.message ?? error);
+        }
+      }
+    }
   });
   engine.on('error', (error) => console.error('[dsh-ios] engine error', error));
   engine.on('exit', (code) => {
