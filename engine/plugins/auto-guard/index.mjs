@@ -17,6 +17,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { parentPort } from 'node:worker_threads';
 import { writeInFlight, describeStep } from '../../runtime/flight-recorder.mjs';
 
 const DEFAULT_TURNS_MAX = 40;
@@ -179,9 +180,14 @@ export default class AutoGuard {
     const s = this.runtime(session);
     s.turns += 1;
 
-    // 飞行记录：这一轮开始跑了。崩溃时这个条目会留在 in-flight.json 里。
-    this.inFlight.set(sessionId(session), { at: Date.now(), step: '' });
-    this.persistInFlight();
+    // 子智能体的轮次不进飞行记录：用户在界面上看不到那些子会话，
+    // 重启后提示「3 个任务被打断」只会让人莫名其妙——父会话自己会报。
+    // （onTurnEnd 里原本就有同样的过滤，两处必须一致。）
+    if (String(session?.header?.origin ?? '') !== 'subagent') {
+      // 飞行记录：这一轮开始跑了。崩溃时这个条目会留在 in-flight.json 里。
+      this.inFlight.set(sessionId(session), { at: Date.now(), step: '' });
+      this.persistInFlight();
+    }
 
     // 落盘记一笔 —— 这是 cost-guard 那条闭环的开关。
     //
@@ -407,15 +413,21 @@ export default class AutoGuard {
     );
   }
 
-  /** 报警走日志 + 宿主通道，不写进模型上下文（否则每轮都在烧 token）。 */
+  /**
+   * 报警走日志 + 宿主通道，不写进模型上下文（否则每轮都在烧 token）。
+   *
+   * 这里必须用 `import { parentPort }`，不能用 `process.parentPort`：
+   * Node 的 worker_threads 里 `process.parentPort` 是 undefined（那是 Electron
+   * utilityProcess 的写法）。原来写错了，`if` 永远不成立，于是所有提醒
+   * ——超轮次、工具连续失败、上下文要压缩——静默丢弃，一条都没到过 App。
+   * 实测确认：worker 里 `typeof process.parentPort === 'undefined'`。
+   */
   notify(message, detail) {
     try {
       this.ctx.logger?.warn?.('[auto-guard] %s', message);
     } catch { /* logger 不可用不致命 */ }
     try {
-      if (typeof process !== 'undefined' && process.parentPort) {
-        process.parentPort.postMessage({ type: 'dsh-ios/notice', level: 'warn', message, detail });
-      }
+      parentPort?.postMessage({ type: 'dsh-ios/notice', level: 'warn', message, detail });
     } catch { /* 桌面跑时没有 parentPort */ }
   }
 }
