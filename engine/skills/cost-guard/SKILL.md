@@ -1,6 +1,10 @@
 ---
 name: cost-guard
 description: 防止 AI 间无限往返、长任务烧光余额。派活给子 agent 或远程工作台之前、对话很多轮、要批量循环时用。
+version: 1.0.0
+source: handwritten
+permissions: [read-only]
+
 ---
 
 # 成本守卫
