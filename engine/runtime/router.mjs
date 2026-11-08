@@ -23,7 +23,9 @@ import { load, save, create, transition, enqueue, expired, pendingOutbox } from 
 import { gate as gateTask } from './delivery-gate.mjs';
 
 /** 默认并发：1。可被 config 覆盖，但不要在没有实测的情况下调高。 */
-export const DEFAULT_MAX_CONCURRENT = 1;
+export /** 同一原因连续失败到几次就判定「任务需要重新拆解」（移植自 kanban 的 MAX_BLOCKS） */
+const MAX_CONSECUTIVE_FAILURES = 2;
+const DEFAULT_MAX_CONCURRENT = 1;
 
 /** 任务优先级：用户直接下的最高，webhook 最低。数值越小越先跑。 */
 const PRIORITY = { user: 0, schedule: 1, 'agent-message': 2, webhook: 3 };
@@ -117,6 +119,31 @@ export class Router {
   }
 
   /** 批准一个等审批的任务：awaiting_approval → queued。 */
+  /**
+   * 记一次失败，返回当前连续同因失败次数。
+   *
+   * 「连续」和「同因」两个条件缺一不可：
+   *   - 只按次数：任务修好一半又遇到新问题，会被误判成"老病复发"
+   *   - 只按原因：中间成功过再失败，不该算连续
+   * 所以成功或进入 running 时必须清零（见 clearFailure）。
+   */
+  noteFailure(state, taskId, reason) {
+    const t = state.tasks[taskId];
+    if (!t) return 0;
+    const same = t.lastFailReason === reason;
+    t.failCount = same ? (t.failCount ?? 0) + 1 : 1;
+    t.lastFailReason = reason;
+    return t.failCount;
+  }
+
+  /** 任务重新开跑或成功时清零连续失败计数。 */
+  clearFailure(state, taskId) {
+    const t = state.tasks[taskId];
+    if (!t) return;
+    t.failCount = 0;
+    t.lastFailReason = null;
+  }
+
   approve(taskId, by = 'user') {
     const state = this.state();
     transition(state, taskId, 'queued', { by, now: this.now() });
@@ -223,6 +250,7 @@ export class Router {
         if (Array.isArray(outcome.artifacts)) t.artifacts = outcome.artifacts.slice(0, 50);
         if (outcome.checkpoint) t.checkpoint = outcome.checkpoint;
         if (verdict.notes.length) t.gateNotes = verdict.notes.slice(0, 10);
+        this.clearFailure(after, task.taskId);
         transition(after, task.taskId, 'succeeded', { by: 'worker', now: this.now() });
       } else {
         transition(after, task.taskId, 'failed', {
@@ -230,11 +258,27 @@ export class Router {
         });
         // 失败任务不自动重跑：进 needs_reconciliation，等人确认。
         transition(after, task.taskId, 'needs_reconciliation', { by: 'router', now: this.now() });
+
+        // 连续失败改道（移植自服务器项目 kanban 的 MAX_BLOCKS）：
+        // 同一任务**同一原因**连续失败到阈值，说明任务本身有问题——拆得太粗、
+        // 缺信息、或者前提不成立。继续原样重试只会重复烧钱。
+        // 这里不打回队列（iOS 上没有人工分诊环节），而是升级通知的措辞，
+        // 明确告诉人「别再原样重试了」。
+        const reason = String(outcome?.error ?? '未知失败').slice(0, 200);
+        const count = this.noteFailure(after, task.taskId, reason);
+        const rerouted = count >= MAX_CONSECUTIVE_FAILURES;
         enqueue(after, {
-          kind: 'task_failed',
-          message: `任务「${t.title}」失败了：${String(outcome?.error ?? '未知失败').slice(0, 120)}`,
+          kind: rerouted ? 'task_needs_redesign' : 'task_failed',
+          message: rerouted
+            ? `任务「${t.title}」连续 ${count} 次以同样原因失败。别再原样重试了——先拆开或补信息。`
+            : `任务「${t.title}」失败了：${reason.slice(0, 120)}`,
           taskId: task.taskId,
-          detail: { kind: 'task_failed', taskId: task.taskId },
+          detail: {
+            kind: rerouted ? 'task_needs_redesign' : 'task_failed',
+            taskId: task.taskId,
+            consecutiveFailures: count,
+            reason,
+          },
         }, this.now());
       }
       save(after, this.dataDir);
