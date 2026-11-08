@@ -216,10 +216,21 @@ final class AppModel {
             // 先把"现在文件里有多少条"记成基线，只弹之后新增的。
             // 不这么做的话，第一次启动 noticeLine=0，会把历史提醒全弹一遍 ——
             // 用户装完 App 一打开就被几周前的提醒轰炸，然后关掉通知。
+            //
+            // 例外：kind=interrupted 是「上次有任务被打断」，它恰恰是在启动前
+            // 写进去的。按基线跳过就永远看不到，所以把最后一条中断记录也带进来。
             if let existing = await Task.detached(priority: .utility, operation: {
                 try? String(contentsOf: url, encoding: .utf8)
             }).value {
-                self?.noticeLine = existing.split(separator: "\n", omittingEmptySubsequences: true).count
+                let lines = existing.split(separator: "\n", omittingEmptySubsequences: true)
+                var baseline = lines.count
+                if let last = lines.last,
+                   let data = last.data(using: .utf8),
+                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   obj["kind"] as? String == "interrupted" {
+                    baseline = max(0, lines.count - 1)
+                }
+                self?.noticeLine = baseline
             }
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
@@ -254,7 +265,20 @@ final class AppModel {
                         continue
                     }
                     guard let message = obj["message"] as? String else { continue }
-                    self.showToast(message, duration: 8)
+                    // kind=interrupted：引擎重启时打断了任务，附上是哪个会话。
+                    // 只弹一条带跳转的提示，不自动重跑——那些任务多半已经改了东西，
+                    // 自动再来一遍比不跑更危险，让用户自己看过后决定。
+                    if obj["kind"] as? String == "interrupted" {
+                        let sessions = (obj["sessions"] as? [String]) ?? []
+                        let first = sessions.first
+                        self.showToast(message, tone: .plain, actions: first.map { id in
+                            [Toast.Action(label: String(localized: "去查看")) { [weak self] in
+                                self?.open(session: id)
+                            }]
+                        } ?? [], duration: 10)
+                        continue
+                    }
+                    self.showToast(message, tone: .plain, duration: 8)
                 }
                 self.noticeLine = lines.count
             }
