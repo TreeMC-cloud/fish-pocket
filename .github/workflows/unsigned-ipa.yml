@@ -78,6 +78,25 @@ jobs:
       - name: Assemble engine
         run: scripts/build-engine.sh
 
+      # 技能检索评测：确认 18 个技能的描述还能把正确的任务命中到正确的技能。
+      # 描述改了但没重跑评测，会出现「技能还在但再也想不起来用」——
+      # 那种失效不报错、不崩溃，只是模型不再调用它，最难发现。
+      # 放这里而不是单独 workflow：它的输出直接影响这次构建该不该出包。
+      - name: Skill retrieval eval
+        run: |
+          cd engine
+          DSH_BUNDLED_SKILL_DIR="$PWD/skills" node runtime/evolve-cli.mjs eval
+
+      # 引擎单元测试。放在构建之前：坏的代码不该走到打包这一步。
+      # 这个项目反复出现「机制写了但没接上」的 bug（task-registry 没有调用者、
+      # capability-status 读错文件名、prompts 被剪枝删空），而那些都**不报错**、
+      # 只在真机上表现为「功能没用」。测试是唯一能提前拦住它们的闸。
+      # 依赖原生模块的测试会明确列为 SKIP（不是失败），见 test/run-all.sh。
+      - name: Engine tests
+        run: |
+          cd engine
+          sh test/run-all.sh
+
       # CI 提速：engine 产物树缓存（npm install + 剪枝省 2-4 分钟）。
       # 键 = build-engine.sh 本身 + engine 全部源码的哈希，任一变化自动失效。
       - name: Cache engine tree
