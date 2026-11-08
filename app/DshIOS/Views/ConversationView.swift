@@ -210,6 +210,16 @@ struct ConversationView: View {
                 if let notice = model.subagentReadOnly(parentAvailable: parentAvailable(model)) {
                     SubagentReadOnlyNotice(title: notice.title, detail: notice.detail)
                 } else {
+                    // 当前会话用的模型：空会话时标题栏已有完整的选择器，这里不重复。
+                    // 已开始的会话原本只有标题菜单，换模型得开新会话或改全局默认——
+                    // 这一条把它放回伸手可及的位置。
+                    if !blank && model.subagentAddress == nil {
+                        HStack(spacing: 0) {
+                            SessionModelPill(model: model, context: context)
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.bottom, 6)
+                    }
                     ComposerView(
                         model: model, context: context, pendingDraft: app.pendingDrafts[sessionId],
                         consumeDraft: { app.pendingDrafts[sessionId] = nil },
