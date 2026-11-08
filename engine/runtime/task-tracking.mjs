@@ -135,7 +135,12 @@ export function summarize(dataDir) {
   let state;
   try { state = registry.load(dataDir); } catch { return { ok: false, reason: '读不到任务表', total: 0, byStatus: {} }; }
   const tasks = state?.tasks;
-  if (!tasks || typeof tasks !== 'object') {
+  // 空对象要算「还没有记录」，不能算「有记录但为 0」。
+  // `load()` 对不存在的文件返回 emptyState()（tasks: {}），它满足 `typeof === 'object'`，
+  // 只查类型会让全新安装显示成"0 个任务"——而面板的空状态文案是"还没开始干活"，
+  // 两者说的不是一回事。判据必须是「有没有任务」，不是「有没有这个字段」。
+  const count = tasks && typeof tasks === 'object' ? Object.keys(tasks).length : 0;
+  if (count === 0) {
     return { ok: false, reason: '还没有任务记录', total: 0, byStatus: {} };
   }
   const byStatus = {};
@@ -143,5 +148,5 @@ export function summarize(dataDir) {
     const s = t?.status ?? 'unknown';
     byStatus[s] = (byStatus[s] ?? 0) + 1;
   }
-  return { ok: true, total: Object.keys(tasks).length, byStatus };
+  return { ok: true, total: count, byStatus };
 }
