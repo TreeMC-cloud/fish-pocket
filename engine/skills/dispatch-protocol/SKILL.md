@@ -1,7 +1,6 @@
 ---
 name: dispatch-protocol
-description: 把活交给子 agent 或远程工作台时，怎么保证对方真的做了、自己知道结果。派单要写清四件事，回执必须带证据。什么时候用：准备调用 subagent、wb_submit_task，或需要委托任何会动手的一方时。
-whenToUse: 把活交给别人（子 agent / 远程工作台）之前，以及收到别人派活之后
+description: 把活交给子 agent 或远程工作台时，保证对方真做了、自己知道结果。派单要写清四件事，回执必须带证据。
 ---
 
 # 派单与回执 —— 多 Agent 协作里最贵的浪费是"双方都在等对方"
