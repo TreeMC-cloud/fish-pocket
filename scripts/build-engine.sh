@@ -125,11 +125,16 @@ PYINJECT
 after=$(du -sk "$nm" | cut -f1)
 echo "engine: $out ($((before/1024)) MB -> $((after/1024)) MB)"
 
-# ---- 体积裁剪：确认零引用的大包（2026-11-08 实测静态/动态 import + require 均 0 处）----
-# pnpm: 只被 `dsh plugin add` CLI 转发使用（App 内无此场景）；npm null/matches 崩溃嫌疑。
-# sql.js/typescript/openai/@anthropic-ai/@google/@smithy: DSH 全树零引用的传递依赖。
-rm -rf "$nm"/sql.js "$nm"/typescript "$nm"/pnpm "$nm"/openai "$nm"/@anthropic-ai \
-       "$nm"/@google "$nm"/@smithy
+# ---- 体积裁剪：只删确认零引用的 ----
+# 真机教训（2026-11-08 第五轮日志）：Cannot find package 'openai' imported from
+# @earendil-works/pi-ai/dist/api/openai-completions.js —— pi-ai 运行时 import openai。
+# 之前"零引用"结论只扫了 @deepseek-ai/* 包，漏了第三方包。全树重扫结论：
+#   openai / @anthropic-ai/sdk / @google/genai ← @earendil-works/pi-ai 引用（LLM 供应商库，必需）
+#   sql.js ← just-bash 静态 require（bundle 第一屏，必需）
+#   @smithy ← @aws-sdk/* 24 个包引用（aws-sdk 是 pi-ai 的传递依赖）
+#   typescript / pnpm ← 全树真正零引用（typescript 只是 devDependencies，pnpm 只被
+#   dsh plugin add CLI 转发），这两个删除安全。
+rm -rf "$nm"/typescript "$nm"/pnpm
 # 剪枝后冒烟必须放在这里：验证的是“最终形态”（物化目录 + 无链接 + 已裁剪），
 # CI 验证过的树 ≠ 打进 .app 的树，真机跑的是后者。
 # dsh-web 是必须测的：它从 dsh-llm import HarnessError，最小 shim 时代就是它先炸。
@@ -147,6 +152,11 @@ rm -rf "$nm"/sql.js "$nm"/typescript "$nm"/pnpm "$nm"/openai "$nm"/@anthropic-ai
   await import('debug');
   await import('human-signals');
   await import('@opentelemetry/api-logs');
+  // pi-ai 是 LLM 供应商库（dsh-llm-deepseek 的底座），静态 import openai ——
+  // 第六轮真机日志就是它炸的（Cannot find package 'openai'）。
+  const pi = await import('@earendil-works/pi-ai');
+  // pi-ai 78 个导出里真正关键的供应商入口（实测形状，别用猜的符号名）
+  if (typeof pi.createProvider !== 'function') throw new Error('pi-ai shape unexpected: no createProvider()');
 " > /tmp/engine-smoke.log 2>&1) || { echo "engine: smoke import failed:" >&2; grep -v 'Warning' /tmp/engine-smoke.log >&2 || cat /tmp/engine-smoke.log >&2; exit 1; }
 echo "engine: post-prune smoke OK"
 after2=$(du -sk "$nm" | cut -f1)
