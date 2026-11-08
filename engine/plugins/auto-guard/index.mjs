@@ -117,6 +117,21 @@ function requireCapabilityStatus() {
   return globalThis.__capStatusMod;
 }
 
+/**
+ * 按需加载任务记账模块（Task Registry 的唯一调用者）。
+ *
+ * Task Registry 那套状态机写了很久，但一直**没有调用方**：
+ * `.tasks.json` 从没被写过，能力地图只能显示「还没开始干活」。
+ * 这里把它接上真实事件——一轮对话就是一个任务。
+ */
+function requireTaskTracking() {
+  if (!globalThis.__taskTrackMod) {
+    const req = createRequire(import.meta.url);
+    globalThis.__taskTrackMod = req('../../runtime/task-tracking.mjs');
+  }
+  return globalThis.__taskTrackMod;
+}
+
 function requireSkillRegistry() {
   if (!globalThis.__skillRegMod) {
     const req = createRequire(import.meta.url);
@@ -358,6 +373,22 @@ export default class AutoGuard {
     } catch { /* 飞行记录是副产物 */ }
   }
 
+  /**
+   * 任务标题：用会话的工作区名，取不到就用轮次。
+   *
+   * 为什么不拿 projection 里的会话标题：那是异步投影，在 turn/start 这一刻
+   * 不一定已经就位（而且它本身是模型生成的标题，一句话任务用它反而更啰嗦）。
+   * 任务表要的是「这件事发生在哪个项目」，工作区名比会话标题更稳定。
+   */
+  sessionTitle(session) {
+    const cwd = session?.header?.cwd;
+    if (typeof cwd === 'string' && cwd) {
+      const base = cwd.replace(/\/+$/, '').split('/').pop();
+      if (base) return base;
+    }
+    return null;
+  }
+
   onTurnStart(session) {
     const s = this.runtime(session);
     s.turns += 1;
@@ -375,6 +406,19 @@ export default class AutoGuard {
         : undefined;
       this.inFlight.set(sessionId(session), { at: Date.now(), step: '', turn: Number.isInteger(turn) ? turn : null });
       this.persistInFlight();
+
+      // 任务表：一轮 = 一个任务。幂等键是 sessionId:turn，重复事件不会建出两条。
+      // 记失败不影响对话——这是补充信息，不是主流程。
+      if (Number.isInteger(turn)) {
+        try {
+          const track = requireTaskTracking();
+          this.currentTask = track.onTurnStart(this.dataDir(), {
+            sessionId: sessionId(session),
+            turn,
+            title: this.sessionTitle(session),
+          });
+        } catch { /* 记账是副产物 */ }
+      }
     }
 
     // 落盘记一笔 —— 这是 cost-guard 那条闭环的开关。
@@ -677,6 +721,20 @@ export default class AutoGuard {
       const reason = event?.data?.reason?.kind;
       // 记忆插件自己发的内省轮次不算工作，记进来会污染统计。
       if (String(session?.header?.origin ?? '') === 'subagent') return;
+
+      // 任务收尾：按 turn/end 的真实原因转终态。
+      // 必须在 writeStatus **之前**——快照统计的是任务表，
+      // 先刷快照再改状态，面板永远显示上一轮的样子。
+      if (Number.isInteger(event?.data?.turn)) {
+        try {
+          requireTaskTracking().onTurnEnd(this.dataDir(), {
+            sessionId: sessionId(session),
+            turn: event.data.turn,
+            reasonKind: reason,
+            error: event?.data?.reason?.error?.message ?? null,
+          });
+        } catch { /* 记账是副产物 */ }
+      }
 
       // 能力快照必须**每轮结束都刷一次**，而且要在所有「可能提前 return 的分支」之前：
       // 原来它写在 `if (!summary) return;` 之后，凡是取不到摘要的轮次
