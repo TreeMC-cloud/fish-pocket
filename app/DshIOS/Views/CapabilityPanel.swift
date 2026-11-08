@@ -60,6 +60,24 @@ struct CapabilityStatus: Decodable, Equatable {
         var lastAt: Double = 0
     }
 
+    /// 定时任务的**只读观察**。
+    /// 执行权归 DSH 自己的 schedule runtime，这里只显示「有哪些、几个到期」，
+    /// 不参与任何投递决策——接管会重复执行。
+    struct Schedules: Decodable, Equatable {
+        struct Row: Decodable, Equatable, Identifiable {
+            var title: String = ""
+            var status: String = ""
+            var scheduledAt: String?
+            var due: Bool = false
+            var id: String { "\(title)-\(scheduledAt ?? "")" }
+        }
+        var ok: Bool = false
+        var reason: String?
+        var total: Int = 0
+        var due: Int = 0
+        var rows: [Row] = []
+    }
+
     struct Alert: Decodable, Equatable, Identifiable {
         var at: Double
         var kind: String
@@ -76,11 +94,12 @@ struct CapabilityStatus: Decodable, Equatable {
     var interrupts = Interrupts()
     var trace = Trace()
     var turns = Turns()
+    var schedules = Schedules()
     var alerts: [Alert] = []
 
     // 后端字段都是 snake/camel 混排，用自定义 key 省得改引擎命名。
     enum CodingKeys: String, CodingKey {
-        case version, generatedAt, headline, taskStats, dream, skills, interrupts, trace, turns, alerts
+        case version, generatedAt, headline, taskStats, dream, skills, interrupts, trace, turns, schedules, alerts
     }
 
     /// 引擎还没写过快照时的占位：显示「未知」，不显示「一切正常」。
@@ -105,7 +124,7 @@ struct CapabilityPanel: View {
     /// 有没有任何真实数据。没有就显示引导，而不是一堆空卡片。
     private var hasAnyData: Bool {
         s.taskStats.total > 0 || s.dream.runs > 0 || s.skills.tracked > 0
-            || s.trace.total > 0 || !s.interrupts.running.isEmpty
+            || s.trace.total > 0 || s.schedules.total > 0 || !s.interrupts.running.isEmpty
     }
 
     var body: some View {
@@ -114,6 +133,7 @@ struct CapabilityPanel: View {
 
             if hasAnyData {
                 if !s.interrupts.running.isEmpty { runningSection }
+                if s.schedules.total > 0 { schedulesSection }
                 if !s.alerts.isEmpty { alertsSection }
                 metricsGrid
                 if let lastRun = lastRunText { footer(lastRun) }
@@ -164,6 +184,40 @@ struct CapabilityPanel: View {
                         .font(.caption)
                         .foregroundStyle(Palette.secondary)
                         .lineLimit(1)
+                }
+            }
+        }
+    }
+
+    // MARK: - 定时任务
+
+    /// 定时任务**只做展示**：执行权在 DSH 自己的 schedule runtime 手里。
+    /// 这里显示「有哪些、几个到期」，用户才知道后台有安排。
+    private var schedulesSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                sectionLabel("定时任务")
+                if s.schedules.due > 0 {
+                    Text("\(s.schedules.due) 个到期")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(Palette.waiting)
+                }
+            }
+            ForEach(s.schedules.rows.prefix(4)) { row in
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(row.due ? Palette.waiting : (row.status == "active" ? Palette.running : Palette.faint))
+                        .frame(width: 6, height: 6)
+                    Text(row.title.isEmpty ? "（未命名）" : row.title)
+                        .font(.caption)
+                        .foregroundStyle(Palette.secondary)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    if row.status != "active" {
+                        Text(row.status == "paused" ? "已暂停" : row.status)
+                            .font(.caption2)
+                            .foregroundStyle(Palette.faint)
+                    }
                 }
             }
         }
