@@ -20,6 +20,7 @@
  *   - 每个任务只有一个 owner：抢占时校验，不是先到先得
  */
 import { load, save, create, transition, enqueue, expired, pendingOutbox } from './task-registry.mjs';
+import { gate as gateTask } from './delivery-gate.mjs';
 
 /** 默认并发：1。可被 config 覆盖，但不要在没有实测的情况下调高。 */
 export const DEFAULT_MAX_CONCURRENT = 1;
@@ -35,11 +36,13 @@ export class Router {
    * @param {(task: object) => Promise<{ok: boolean, error?: string, artifacts?: string[], checkpoint?: object}>} [options.runTask]
    *        由宿主注入：真正把任务交给 Worker 执行。不注入时 execute() 只做排队不执行。
    */
-  constructor({ dataDir, maxConcurrent = DEFAULT_MAX_CONCURRENT, runTask = null, now = Date.now } = {}) {
+  constructor({ dataDir, maxConcurrent = DEFAULT_MAX_CONCURRENT, runTask = null, now = Date.now, requireArtifacts = false } = {}) {
     this.dataDir = dataDir;
     this.maxConcurrent = Math.max(1, Number(maxConcurrent) || DEFAULT_MAX_CONCURRENT);
     this.runTask = runTask;
     this.now = now;
+    /** 所有任务都必须交产物才算出活（默认关，按项目开）。 */
+    this.requireArtifacts = requireArtifacts === true;
   }
 
   state() { return load(this.dataDir); }
@@ -197,8 +200,29 @@ export class Router {
       // 否则取消是装饰——界面显示已取消，副作用实际照样发生。
       if (t.status !== 'running') return;
       if (outcome?.ok) {
+        // 交付 gate：ok:true 只说明「没抛异常」，不等于「东西真的出来了」。
+        // 不过 gate 就不算成功——改成 needs_reconciliation，让人看一眼。
+        // 这是抄 Blender 插件那条：gate 不过就阻止交付，而不是给个警告继续走。
+        const verdict = gateTask(t, outcome, { requireArtifacts: this.requireArtifacts });
+        if (!verdict.pass) {
+          t.lastError = `交付校验未通过：${verdict.blockers.join('；')}`.slice(0, 500);
+          transition(after, task.taskId, 'failed', {
+            by: 'gate', error: t.lastError, now: this.now(),
+          });
+          transition(after, task.taskId, 'needs_reconciliation', { by: 'router', now: this.now() });
+          enqueue(after, {
+            kind: 'gate_failed',
+            message: `任务「${t.title}」没通过交付校验：${verdict.blockers[0] ?? '未知原因'}`,
+            taskId: task.taskId,
+            detail: { kind: 'gate_failed', taskId: task.taskId, blockers: verdict.blockers },
+          }, this.now());
+          save(after, this.dataDir);
+          void this.execute();
+          return;
+        }
         if (Array.isArray(outcome.artifacts)) t.artifacts = outcome.artifacts.slice(0, 50);
         if (outcome.checkpoint) t.checkpoint = outcome.checkpoint;
+        if (verdict.notes.length) t.gateNotes = verdict.notes.slice(0, 10);
         transition(after, task.taskId, 'succeeded', { by: 'worker', now: this.now() });
       } else {
         transition(after, task.taskId, 'failed', {
