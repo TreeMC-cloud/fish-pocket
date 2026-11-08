@@ -17,7 +17,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { writeInFlight } from '../../runtime/flight-recorder.mjs';
+import { writeInFlight, describeStep } from '../../runtime/flight-recorder.mjs';
 
 const DEFAULT_TURNS_MAX = 40;
 const DEFAULT_REPEAT_MAX = 3;
@@ -95,6 +95,8 @@ export default class AutoGuard {
           else if (event?.type === 'turn/end') this.onTurnEnd(session, event);
           else if (event?.type === 'tool/result') this.onToolResult(session, event);
           else if (event?.type === 'compaction/start') this.onCompaction(session, event);
+          // 工具调用的参数只在 assistant/message 里：借它更新「最后一步」。
+          else if (event?.type === 'assistant/message') this.onAssistantMessage(session, event);
         }),
       ];
 
@@ -178,7 +180,7 @@ export default class AutoGuard {
     s.turns += 1;
 
     // 飞行记录：这一轮开始跑了。崩溃时这个条目会留在 in-flight.json 里。
-    this.inFlight.set(sessionId(session), Date.now());
+    this.inFlight.set(sessionId(session), { at: Date.now(), step: '' });
     this.persistInFlight();
 
     // 落盘记一笔 —— 这是 cost-guard 那条闭环的开关。
@@ -301,6 +303,62 @@ export default class AutoGuard {
   traceFile() {
     return process.env.DSH_TRACE_FILE
       || path.join(process.env.DSH_IOS_DATA || process.cwd(), '.trace.jsonl');
+  }
+
+  /**
+   * 每个工具调用开始时把「最后一步」写进飞行记录。
+   *
+   * 为什么必须在这里更新：崩溃不会提前打招呼，等到出事再问「刚才在干什么」
+   * 已经问不到了。每步都写一次（覆盖，不追加），崩溃时文件里就是最后一步。
+   *
+   * `summary` 由调用方从 tool-call 参数里提取：tool/result 只有工具名，
+   * 参数在 assistant/message 的 tool-call 块里。
+   */
+  recordStep(session, toolName, summary) {
+    const id = sessionId(session);
+    const current = this.inFlight.get(id);
+    // 只更新已经在飞的：没记录的会话（比如子智能体）不凭空造一条。
+    if (!current) return;
+    current.step = describeStep(toolName, summary);
+    current.at = Date.now();
+    this.persistInFlight();
+  }
+
+  /**
+   * 一条助手消息里可能有多个工具调用。取最后一个带参数的，写成「最后一步」。
+   *
+   * 只在消息层面写一次盘（而不是每个调用写一次）：一条消息里常常并排三四个
+   * 读取，逐个写是纯浪费；反正崩溃时能看到的只是最后那一个。
+   */
+  onAssistantMessage(session, event) {
+    try {
+      const content = event?.data?.message?.content ?? event?.data?.content;
+      if (!Array.isArray(content)) return;
+      let last = null;
+      for (const part of content) {
+        if (part?.type !== 'tool-call' || typeof part.name !== 'string') continue;
+        last = part;
+      }
+      if (!last) return;
+      this.recordStep(session, last.name, this.argumentHint(last));
+    } catch { /* 摘要只是锦上添花，出错不影响主流程 */ }
+  }
+
+  /** 从工具参数里挑一句人能看懂的话：命令优先，其次路径，再其次查询词。 */
+  argumentHint(part) {
+    try {
+      const raw = part?.arguments;
+      const args = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      if (!args || typeof args !== 'object') return '';
+      const pick = args.command ?? args.cmd ?? args.file_path ?? args.path ?? args.pattern ?? args.query ?? args.url;
+      if (typeof pick === 'string' && pick.trim()) return pick.trim();
+      // 命令常常是数组形式（argv）
+      if (Array.isArray(args.command)) return args.command.join(' ');
+      return '';
+    } catch {
+      // 参数不是合法 JSON：退回原文开头，总比没有强。
+      return typeof part?.arguments === 'string' ? part.arguments.slice(0, 40) : '';
+    }
   }
 
   onToolResult(session, event) {
