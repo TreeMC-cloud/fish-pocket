@@ -53,7 +53,13 @@ struct MarkdownView: View {
                 Text(inline(text)).foregroundStyle(Palette.secondary)
             }
         case .code(let language, let code):
-            if language == "schemaJson", let node = GenUIView.parse(code) {
+            if language == "html" || language == "htm" {
+                // AI 直接贴网页源码时，给一个「预览」入口——不必复制出去存文件。
+                // SVG 也走同一条路（WebView 能直接渲染 SVG）。
+                CodeBlockView(language: language, code: code, preview: .html(code))
+            } else if language == "svg" {
+                CodeBlockView(language: language, code: code, preview: .html("<html><body style='margin:0;display:grid;place-items:center;height:100vh;background:#fff'>\(code)</body></html>"))
+            } else if language == "schemaJson", let node = GenUIView.parse(code) {
                 // 面板 + 一个「钉住」角标：用户可以主动把这块留着，而不只是自动钉最后一张。
                 GenUIView(node: node)
                     .overlay(alignment: .topTrailing) {
@@ -281,15 +287,38 @@ enum LinkTarget: Identifiable {
 struct CodeBlockView: View {
     let language: String?
     let code: String
+    /// 能预览的内容（网页 / SVG）。给了就在工具条里多一个「预览」。
+    var preview: PreviewContent?
     @State private var copied = false
     @State private var expanded = false
+    @State private var showingPreview = false
     private let cap = 24
+
+    /// 预览什么、怎么预览。
+    enum PreviewContent {
+        case html(String)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text(language?.isEmpty == false ? language! : "code").font(.caption).foregroundStyle(Palette.secondary)
                 Spacer()
+                if case .html = preview {
+                    Button {
+                        Haptics.tap()
+                        showingPreview = true
+                    } label: {
+                        Label("预览", systemImage: "eye")
+                            .font(.caption)
+                            .foregroundStyle(Palette.ink)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 4)
+                            .glassPill(.floating)
+                    }
+                    .buttonStyle(GlassButtonStyle())
+                    .accessibilityLabel("预览网页")
+                }
                 Button {
                     copyToPasteboard(code)
                     copied = true
@@ -319,6 +348,11 @@ struct CodeBlockView: View {
             }
         }
         .background(Palette.field, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .sheet(isPresented: $showingPreview) {
+            if case .html(let markup) = preview {
+                HTMLPreviewSheet(html: markup)
+            }
+        }
     }
 }
 
