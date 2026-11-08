@@ -97,6 +97,9 @@ struct SettingsView: View {
                 Section {
                     NavigationLink { PluginsView() } label: { valueRow("插件", pluginCount.map { String(localized: "\($0) 个") } ?? "") }
                     NavigationLink { SchedulesView(openSession: openSession) } label: { valueRow("自动化", app.scheduleCount.map { String(localized: "\($0) 个") } ?? "") }
+                    // 能力地图原来是空会话页里的一块，有对话就永远看不到。
+                    // 治理层做的事（任务、整理、技能、告警）需要常驻入口，放这里连同「插件／自动化」一起。
+                    NavigationLink { CapabilityPage() } label: { valueRow("能力地图", capabilitySummary) }
                 }
                 .groupedRow()
 
@@ -202,6 +205,13 @@ struct SettingsView: View {
             Spacer()
             Text(value).foregroundStyle(Palette.secondary).lineLimit(1)
         }
+    }
+
+    /// 能力地图那一行的右侧：一句话说清治理层现在的状态。
+    /// 没有数据时留空而不是写「正常」——没跑过和跑了没问题不是一回事。
+    private var capabilitySummary: String {
+        guard let capability = app.capability else { return "" }
+        return capability.headline
     }
 
     /// G-01: the permission new sessions start with; full access asks first.
