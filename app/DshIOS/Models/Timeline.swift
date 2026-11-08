@@ -513,6 +513,30 @@ struct TimelineBuilder {
     private var nextStepInbox = InboxState()
     private var currentStep: Int?
 
+    /// Close a turn that was interrupted by an engine restart, for this client view only.
+    /// This deliberately does not append a durable event or advance `turnEndSeq`.
+    @discardableResult
+    mutating func markInterrupted(turn requestedTurn: Int? = nil, at time: Date = .now) -> Bool {
+        guard let turn = requestedTurn ?? currentTurn else { return false }
+        if currentTurn == turn { running = false; currentStep = nil }
+        turnInfo[turn, default: TurnInfo()].closedKind = "interrupted"
+        guard let index = items.lastIndex(where: {
+            if case .assistant(let itemTurn, _, _, _) = $0 { return itemTurn == turn }
+            return false
+        }), case .assistant(let itemTurn, var blocks, let started, let ended) = items[index], ended == nil else { return true }
+        for (position, block) in blocks.enumerated() {
+            if case .tool(var call) = block, !call.finished {
+                call.result = ""
+                call.isError = true
+                call.errorCode = "interrupted"
+                call.errorName = "Interrupted"
+                blocks[position] = .tool(call)
+            }
+        }
+        items[index] = .assistant(turn: itemTurn, blocks: blocks, startedAt: started, endedAt: time)
+        return true
+    }
+
     /// Apply one event; returns whether `items` changed.
     @discardableResult
     mutating func apply(_ event: JSON) -> Bool {
