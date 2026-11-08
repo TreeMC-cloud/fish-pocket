@@ -109,6 +109,30 @@ function sessionId(session) {
  * 而 memory-store 又去 require meow-memory（一个大包）。顶层加载会让
  * 插件启动变慢，而 Dream 十分钟才可能跑一次——不值得为它付启动成本。
  */
+function requireSafeEdit() {
+  if (!globalThis.__safeEditMod) {
+    const req = createRequire(import.meta.url);
+    globalThis.__safeEditMod = req('../../runtime/safe-edit.mjs');
+  }
+  return globalThis.__safeEditMod;
+}
+
+function requireSkillStats() {
+  if (!globalThis.__skillStatsMod) {
+    const req = createRequire(import.meta.url);
+    globalThis.__skillStatsMod = req('../../runtime/skill-stats.mjs');
+  }
+  return globalThis.__skillStatsMod;
+}
+
+function requireSceneSchema() {
+  if (!globalThis.__sceneSchemaMod) {
+    const req = createRequire(import.meta.url);
+    globalThis.__sceneSchemaMod = req('../../runtime/scene-schema.mjs');
+  }
+  return globalThis.__sceneSchemaMod;
+}
+
 function requireDream() {
   if (!globalThis.__dreamMods) {
     const req = createRequire(import.meta.url);
@@ -222,7 +246,11 @@ export default class AutoGuard {
         try {
           ctx.on('tools/pre-execute', (call, next) => {
             const name = call?.name ?? call?.tool;
-            if (!name || !DISPATCH_TOOL_PATTERN.test(name)) return next?.(call);
+            if (!name || !DISPATCH_TOOL_PATTERN.test(name)) {
+              // 非派活工具：走编辑预检（只对会改文件的工具生效）
+              const blocked = this.precheckEdit(call);
+              return blocked ?? next?.(call);
+            }
             const mem = this.memoryPressure();
             if (!mem) return next?.(call);   // 量不了不等于可以派，但也不该误杀正常派活
             const usedPct = (1 - mem.ratio) * 100;
@@ -337,6 +365,10 @@ export default class AutoGuard {
     // 现在每轮往同一个文件追加一行，两边用同一份事实。
     this.recordTurn(session, s.turns);
 
+    // 场景解析：确定「现在在哪个项目」。没有场景时停下问，而不是退回通用模式瞎干。
+    // 这是 scene-schema.mjs 唯一的运行入口——之前它只有测试，从没被调用过。
+    this.resolveSceneFor(session);
+
     if (s.turns > this.turnsMax && !s.warnedTurn) {
       s.warnedTurn = true;
       this.notify(
@@ -434,6 +466,84 @@ export default class AutoGuard {
   ledgerFile() {
     return process.env.DSH_SENTINEL_LEDGER
       || path.join(process.env.DSH_IOS_DATA || process.cwd(), '.sentinel.jsonl');
+  }
+
+  /**
+   * 编辑前预检：在临时副本上试改一遍，语法不通就拦下。
+   *
+   * 为什么放在 pre-execute：钩子只能「拦」或「放」，不能替工具执行。
+   * 所以这里把改动试算一遍（不落盘），通过才放行真正的工具去改。
+   * 失败时返回错误字符串（钩子的拒绝语义），此时文件一个字都没动。
+   *
+   * 只处理「替换片段」类工具（edit / str_replace / apply_patch）。
+   * `write` 整文件覆盖不适用：它没有 oldStr，也没法在写入前拿到最终内容。
+   *
+   * @returns {string|null} 拒绝理由；null 表示放行
+   */
+  precheckEdit(call) {
+    try {
+      const name = String(call?.name ?? call?.tool ?? '').split('__').pop();
+      if (!/^(edit|str_replace|str_replace_editor|apply_patch)$/i.test(name)) return null;
+
+      const args = call?.args ?? call?.input ?? call?.arguments;
+      if (!args) return null;
+      const file = args.file_path ?? args.path ?? args.filePath;
+      const oldStr = args.old_str ?? args.old_string ?? args.oldStr ?? args.search;
+      const newStr = args.new_str ?? args.new_string ?? args.newStr ?? args.replace;
+      if (typeof file !== 'string' || !file) return null;
+      if (typeof oldStr !== 'string' || typeof newStr !== 'string') return null;
+
+      const { safeEdit } = requireSafeEdit();
+      const result = safeEdit(file, oldStr, newStr, { dryRun: true });
+      if (result.ok) return null;
+
+      if (result.stage === 'lint') {
+        return `这次编辑会让文件语法出错（${result.message}）。已经拦下，文件没动。` +
+               '改法：先确认改动位置和括号/引号是否配对，再试一次。';
+      }
+      if (result.stage === 'unique') {
+        return `要替换的片段${result.message}。请把 old_str 写得更完整一点，确保只匹配那一处。`;
+      }
+      return null;      // precheck 失败（文件读不到等）不该替工具做决定
+    } catch {
+      return null;      // 预检本身出错时放行，不要因为检查器坏了就卡死编辑
+    }
+  }
+
+  /**
+   * 解析当前场景，结果缓存在插件里（每轮更新一次，不重复读盘）。
+   *
+   * 为什么必须接：scene-schema.mjs 早就写好了五种解析路径和「无场景就停下」的规则，
+   * 但没有任何运行时代码调用它——场景从来没被真正解析过，
+   * 所谓「按项目隔离」只是一句空话。
+   *
+   * 用 session.header.cwd 作工作区：meow-memory 也是拿它定位记忆库的，
+   * 两个模块必须看同一个路径，否则场景和记忆会指向不同的项目。
+   */
+  resolveSceneFor(session) {
+    try {
+      const cwd = session?.header?.cwd;
+      if (typeof cwd !== 'string' || !cwd) return;    // 没有 cwd 就没法解析，跳过
+      const { resolveScene } = requireSceneSchema();
+      const result = resolveScene({
+        workspaceRoot: cwd,
+        session: { sceneId: session?.header?.sceneId ?? null },
+        defaultRoot: process.env.DSH_DEFAULT_SCENE || null,
+      });
+      this.scene = result;
+      if (result.status === 'ambiguous') {
+        // 只在第一次说，不要每轮都提醒
+        if (!this.sceneWarned) {
+          this.sceneWarned = true;
+          this.notify(
+            '还没有配置场景：先选一个项目再开始，否则规矩和记忆会混在一起。',
+            { kind: 'scene_missing', session: sessionId(session) },
+          );
+        }
+      } else if (result.status === 'mismatch') {
+        this.notify(result.reason, { kind: 'scene_mismatch', session: sessionId(session) });
+      }
+    } catch { /* 场景解析失败不影响对话 */ }
   }
 
   /**
@@ -684,6 +794,57 @@ export default class AutoGuard {
    * 误报代价：一条多余提醒。漏报代价：系统提示词和执行权被外部文本拿走。
    * 两者不对称，所以宁可报。
    */
+  /**
+   * 写文件的工具报成功之后，检查产物真的落地了。
+   *
+   * 防的是这种：工具返回「已写入」，但文件是 0 字节、或者根本没建成
+   * （权限、路径不存在、磁盘满被吞掉）。模型拿着"成功"继续往下做，
+   * 用户几小时后才发现什么都没生成。
+   *
+   * 只检查**明确声称写了某个路径**的工具，不做全局扫描——
+   * 扫整个目录既慢又容易误报。
+   */
+  verifyToolOutput(name, event, session) {
+    try {
+      const args = this.toolArgs(event);
+      if (!args) return;
+      const target = args.file_path ?? args.path ?? args.filePath;
+      if (typeof target !== 'string' || !target) return;
+      // 只对写操作检查；读操作不产生产物
+      if (!/^(write|edit|create|apply_patch|multi_edit)$/i.test(String(name).split('__').pop())) return;
+
+      const fsMod = fs;
+      const full = path.isAbsolute(target)
+        ? target
+        : path.resolve(session?.header?.cwd ?? process.cwd(), target);
+
+      let stat;
+      try {
+        stat = fsMod.statSync(full);
+      } catch {
+        this.notify(
+          `工具 ${name} 报告成功，但文件不存在：${target}。别假设已经写好了。`,
+          { kind: 'gate_failed', tool: name, path: target, session: sessionId(session) },
+        );
+        return;
+      }
+      if (stat.isFile() && stat.size === 0) {
+        this.notify(
+          `工具 ${name} 报告成功，但文件是 0 字节：${target}。别假设已经写好了。`,
+          { kind: 'gate_failed', tool: name, path: target, session: sessionId(session) },
+        );
+      }
+    } catch { /* 校验失败不影响工具结果 */ }
+  }
+
+  /** 从 tool/result 里取回参数（可能是字符串或对象）。 */
+  toolArgs(event) {
+    const raw = event?.data?.args ?? event?.data?.input ?? event?.data?.arguments;
+    if (!raw) return null;
+    if (typeof raw === 'object') return raw;
+    try { return JSON.parse(String(raw)); } catch { return null; }
+  }
+
   /** 从 tool/result 里取回给模型看的文本（多段 text 块拼接）。 */
   resultText(event) {
     const content = event?.data?.message?.content ?? event?.data?.content;
@@ -702,6 +863,35 @@ export default class AutoGuard {
     const name = event?.data?.name ?? event?.data?.tool ?? null;
     const failed = event?.data?.isError === true || event?.data?.error != null;
     if (!name) return;
+
+    // 工具结果校验：把 delivery-gate 的判据用在每个工具调用上。
+    //
+    // 为什么不接整套 Router：App 侧没有「任务」实体（只有 Swift 的 Task 结构体），
+    // 工具调用也没有 callId 能和 dispatch 事件稳定配对。硬接会造出一个
+    // 看起来在跑、实际对不上号的假状态机。
+    //
+    // 这里取 gate 最核心的那条：**产物必须真的存在**。写文件的工具报成功后，
+    // 检查文件在不在、是不是 0 字节。这是"假成功"最常见的样子。
+    if (!failed) this.verifyToolOutput(name, event, session);
+
+    // 技能加载时记一次使用。这是 skill-stats 唯一的数据来源——
+    // 没有它，健康度判定永远是「数据不足」，自动降级那套等于不存在。
+    //
+    // 注意：只记「加载了」，不记「有没有解决问题」。后者需要把技能
+    // 和任务结果关联，现在还没有这个关联键，所以记为 ok=null（未知），
+    // 不污染成功率统计。
+    if (name === 'skill' && !failed) {
+      try {
+        const args = event?.data?.args ?? event?.data?.input ?? event?.data?.arguments;
+        const skillName = typeof args === 'string'
+          ? (JSON.parse(args)?.name ?? null)
+          : (args?.name ?? null);
+        if (typeof skillName === 'string' && skillName) {
+          const { record } = requireSkillStats();
+          record(skillName, null, { dataDir: this.dataDir() });
+        }
+      } catch { /* 记账失败不影响工具结果 */ }
+    }
 
     // 只看会带回外部文本的工具；本地读写文件不在其中（那些内容可信度更高）。
     if (!failed && EXTERNAL_CONTENT_TOOLS.test(name)) {
