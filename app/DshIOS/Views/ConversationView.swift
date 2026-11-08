@@ -352,10 +352,12 @@ struct ConversationView: View {
     }
 
     /// 「出错了」弹窗的开关。单独拎出来是因为内联闭包会让类型推断超时。
+    /// 注意：这是 struct 上的计算属性，看到的是 `self.model`（Optional），
+    /// body 里 `if let model` 的局部解包传不进来，必须自己走可选链。
     private var errorPresented: Binding<Bool> {
         Binding(
-            get: { model.error != nil },
-            set: { shown in if !shown { model.error = nil } }
+            get: { self.model?.error != nil },
+            set: { shown in if !shown { self.model?.error = nil } }
         )
     }
 
