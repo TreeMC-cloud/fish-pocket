@@ -167,12 +167,24 @@ export default class AutoGuard {
         return m ? Number(m[1]) : null;
       };
       const total = get('MemTotal');
-      const avail = get('MemAvailable') ?? get('MemFree');
-      if (!total || avail === null) return null;
+      // ⚠ iSH 的 /proc/meminfo 没有 MemAvailable，只有 MemFree；而 MemFree 不含
+      // 可回收缓存（实测 64MB/4GB），拿它当「可用」会算出 97% 的假警报。
+      // 没有 MemAvailable 就走 os.freemem()——iOS 上它是真实值（实测 3447MB）。
+      const avail = get('MemAvailable');
+      if (total && avail !== null) {
+        return {
+          totalMB: Math.round(total / 1024),
+          freeMB: Math.round(avail / 1024),
+          ratio: avail / total,
+        };
+      }
+      const totalBytes = os.totalmem();
+      const freeBytes = os.freemem();
+      if (!totalBytes) return null;
       return {
-        totalMB: Math.round(total / 1024),
-        freeMB: Math.round(avail / 1024),
-        ratio: avail / total,
+        totalMB: Math.round(totalBytes / 1048576),
+        freeMB: Math.round(freeBytes / 1048576),
+        ratio: freeBytes / totalBytes,
       };
     } catch {
       // /proc 不可用：退回 os.freemem（iOS 上通常是 0，但至少不崩）
