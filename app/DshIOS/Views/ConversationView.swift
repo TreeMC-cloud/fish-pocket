@@ -41,6 +41,11 @@ struct ConversationView: View {
     /// 钉住的面板：收起了没有 / 用户关掉的是哪一块。
     @State private var panelCollapsed = true
     @State private var dismissedPanelId: String?
+    /// 缓存的可钉面板。放在这里而不是每次 body 扫全表：流式输出时 items 高频变化，
+    /// 每次扫表 + 解析 JSON 会拖慢长回复的滚动。
+    @State private var pinnedPanel: PinnedPanel?
+    /// 用户主动钉住的面板。有它就压过自动挑出来的最后一张。
+    @State private var manualPanel: PinnedPanel?
     @State private var composerFocused = false
     /// The new-conversation page's free height: a short one drops the headline.
     @State private var heroHeight: CGFloat = .infinity
@@ -176,12 +181,25 @@ struct ConversationView: View {
             }
         }
         .background(Palette.background)
+        // 面板上的「钉住」按钮：手动钉的优先，并且把它展开出来。
+        .environment(\.pinPanel, { node, title in
+            withAnimation(.snappy(duration: 0.24)) {
+                manualPanel = PinnedPanel(node: node, title: title, id: "manual-\(UUID().uuidString.prefix(8))")
+                panelCollapsed = false
+                dismissedPanelId = nil
+            }
+        })
+        // 只在时间线结构变化时重算可钉面板（不是每个流式 token）。
+        .onChange(of: model.items.last?.id) { _, _ in
+            let found = PanelDockPicker.latest(in: model.items)
+            pinnedPanel = found.map { PinnedPanel(node: $0.node, title: $0.title, id: $0.id) }
+        }
         .overlay { if blank { hero(model) } }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
                 if blank && !composerFocused && model.composer.isEmpty { suggestions(model).padding(.bottom, 10) }
                 // 面板坞：AI 生成的面板钉在这儿，不随聊天滚走（收起态是一条玻璃胶囊）。
-                if let pinned = PanelDockPicker.latest(in: model.items), pinned.id != dismissedPanelId {
+                if let pinned = manualPanel ?? pinnedPanel, pinned.id != dismissedPanelId {
                     PanelDock(
                         node: pinned.node,
                         title: pinned.title,
@@ -401,6 +419,54 @@ struct ConversationView: View {
                 AgentPresetChip(sessionId: sessionId, catalog: presets)
             }
             .padding(.top, 6)
+
+            // 快捷胶囊：小白第一眼不知道该问什么，给四个具体入口。
+            // 点一下只填提示词不直接发送——先让他看见自己要发什么，能改再发。
+            if !keyboardUp {
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
+                    ForEach(HeroShortcut.all) { shortcut in
+                        Button {
+                            Haptics.tap()
+                            // 带场景模板时把模板名写进提示词，AI 会照该场景的面板组织回答
+                            // （对应 engine/skills/scene/panel.mjs 的 TEMPLATES 键）。
+                            model.composer.text = shortcut.prompt
+                            if let scene = shortcut.scene {
+                                app.pendingSceneHint = scene
+                            }
+                            dismissKeyboard()
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: shortcut.icon)
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundStyle(Palette.ink)
+                                    .frame(width: 26, height: 26)
+                                    .glassSurface(
+                                        RoundedRectangle(cornerRadius: 9, style: Glass.corner),
+                                        .floating
+                                    )
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(shortcut.title)
+                                        .font(.footnote.weight(.semibold))
+                                        .foregroundStyle(Palette.ink)
+                                        .lineLimit(1)
+                                    Text(shortcut.detail)
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(Palette.secondary)
+                                        .lineLimit(1)
+                                }
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 9)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .glassCard(radius: 16, .panel)
+                        }
+                        .buttonStyle(GlassButtonStyle(radius: 16))
+                    }
+                }
+                .padding(.top, 14)
+                .transition(.opacity)
+            }
         }
         .padding(.horizontal, 24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -877,21 +943,10 @@ private struct UserBubble: View {
                 .lineSpacing(3)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
-                // 用户气泡：实心墨色（黑白极简的骨架不动），只加玻璃的边缘高光，
-                // 让它和 AI 侧的玻璃面板在同一套材质语言里。
+                // 内容层不用玻璃：Material 模糊在长列表里逐条叠加会掉帧，
+                // 而且 iOS 26 的 Liquid Glass 本来就只用在控件/浮层，
+                // 时间线是内容，保持实心才读得清、滚得顺。
                 .background(Palette.bubble, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 22, style: Glass.corner)
-                        .strokeBorder(
-                            LinearGradient(
-                                colors: [.white.opacity(0.22), .clear, .black.opacity(0.10)],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            ),
-                            lineWidth: 0.5
-                        )
-                }
-                .shadow(color: .black.opacity(0.12), radius: 14, y: 6)
                 .contextMenu {
                     Button { copyToPasteboard(text) } label: { Label("复制", systemImage: "doc.on.doc") }
                     // Masked text stays masked until the reader asks: this would show it whole.
