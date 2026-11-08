@@ -1,6 +1,10 @@
 ---
 name: dispatch-protocol
 description: 把活交给子 agent 或远程工作台时，保证对方真做了、自己知道结果。派单要写清四件事，回执必须带证据。
+version: 1.0.0
+source: handwritten
+permissions: [read-only]
+
 ---
 
 # 派单与回执 —— 多 Agent 协作里最贵的浪费是"双方都在等对方"
