@@ -36,6 +36,10 @@ final class SessionModel {
         return result
     }
     private(set) var queued: [(id: String, text: String)] = []
+    /// 这个会话上次被引擎重启打断，还没被用户看过/关掉过。
+    /// 由 AppModel 在收到 kind=interrupted 时置位；用户在会话里关掉横幅后清除。
+    var interruptedNotice: String?
+
     private(set) var modelSelection: (provider: String, model: String, effort: String?)?
     private(set) var permission: String?
     private(set) var tokens: (input: Int, output: Int, cacheRead: Int) = (0, 0, 0)
