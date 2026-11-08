@@ -71,7 +71,11 @@ final class Diagnostics {
     /// 一个后台循环就够了：读增量 → 发 → 睡。并发发送没有必要，
     /// 反而会让服务器上的行序错乱（追加写的顺序就是到达顺序）。
     private var loop: Task<Void, Never>?
-    private let session: URLSession
+    /// 真机崩溃的根因：原来用 `URLSessionConfiguration.background` 建会话，
+    /// 而 `data(for:)` 在后台会话上不受支持，App 一打开上报就崩。
+    /// 后台会话是给「退后台后继续传文件」用的；这里每 20 秒一轮、断网等下轮，
+    /// ephemeral 完全够，也不会把上传任务残留到系统里。
+    private let session = URLSession(configuration: .ephemeral)
 
     private init() {
         // 首次运行没有存过值：预填默认服务器，但开关保持关闭。
@@ -83,12 +87,6 @@ final class Diagnostics {
         cursor = UInt64(defaults.integer(forKey: Keys.cursor))
         sentBatches = defaults.integer(forKey: Keys.sentBatches)
         if let t = defaults.object(forKey: Keys.lastPush) as? Date { lastPushAt = t }
-        let config = URLSessionConfiguration.background(withIdentifier: "cc.imsai.sigma.diagnostics")
-        config.isDiscretionary = false
-        config.sessionSendsLaunchEvents = true
-        config.timeoutIntervalForRequest = 30
-        config.timeoutIntervalForResource = 120
-        session = URLSession(configuration: config)
         // init 里不能直接 restart()（读 self 的存储属性还没完成），
         // 推到下一个 runloop：那时对象已经可用，且不会卡住启动。
         Task { @MainActor [weak self] in self?.restart() }
@@ -134,7 +132,7 @@ final class Diagnostics {
         request.setValue(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?",
                          forHTTPHeaderField: "X-Sigma-Version")
         request.setValue(String(batch.engineCursor), forHTTPHeaderField: "X-Sigma-Offset")
-        request.setValue(ISO8601DateFormatter().string(from: Date()), forHTTPHeaderField: "X-Sigma-At")
+        request.setValue(Self.stampFormatter.string(from: Date()), forHTTPHeaderField: "X-Sigma-At")
         if !token.isEmpty { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         request.httpBody = batch.data
 
@@ -197,6 +195,10 @@ final class Diagnostics {
         return data
     }
 
+    /// 时间戳只 init 一次：每次 new 一个 formatter 在 20 秒一轮的循环里是浪费，
+    /// 而且这个类全程 @MainActor，不存在线程竞争。
+    private static let stampFormatter = ISO8601DateFormatter()
+
     /// 设备标识：只用于在服务器上区分是哪台机器，不是广告标识，
     /// 取系统给 App 的 identifierForVendor，卸载重装会变——对开发期足够了。
     private var deviceId: String {
@@ -230,7 +232,7 @@ final class Diagnostics {
 
     /// 记一条 App 事件。永远不抛错、不阻塞调用方：日志是旁路，不能拖累主流程。
     func record(_ message: String, _ detail: String? = nil) {
-        let stamp = ISO8601DateFormatter().string(from: Date())
+        let stamp = Self.stampFormatter.string(from: Date())
         var line = "[\(stamp)] \(message)"
         if let detail, !detail.isEmpty { line += " · \(detail)" }
         line += "\n"
