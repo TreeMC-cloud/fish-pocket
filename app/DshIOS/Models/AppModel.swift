@@ -249,6 +249,32 @@ final class AppModel {
         }
     }
 
+    // MARK: - 任务控制
+
+    /// 让排队/失败的任务重排，或取消它。
+    ///
+    /// 走文件而不是 RPC：Swift 只能调 DSH 宿主注册过的 RPC，加新的要改宿主包。
+    /// 引擎侧 `task-control.mjs` 每 15 秒扫一次这个目录，读到 `.json` 就执行、
+    /// 写回同名 `.out`。App 这边不需要等结果——`capability.json` 会跟着刷新。
+    ///
+    /// 文件名带 UUID：同一个请求不会被处理两次（引擎按文件名幂等）。
+    @discardableResult
+    func controlTask(_ action: String, taskId: String? = nil) -> Bool {
+        let dir = EnginePaths.real(EnginePaths.shared + "/task-control")
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            var body: [String: Any] = ["action": action]
+            if let taskId { body["taskId"] = taskId }
+            let data = try JSONSerialization.data(withJSONObject: body)
+            let name = "req-\(UUID().uuidString.lowercased()).json"
+            try data.write(to: dir.appendingPathComponent(name))
+            return true
+        } catch {
+            showToast(String(localized: "控制请求写入失败：\(error.localizedDescription)"), duration: 5)
+            return false
+        }
+    }
+
     /// 轮询引擎写的提醒文件，读到新的就弹 toast。
     ///
     /// 用「读到第几行」而不是「文件是否变化」：引擎重启后文件不会清空，
