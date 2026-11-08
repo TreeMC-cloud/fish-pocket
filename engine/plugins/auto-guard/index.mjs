@@ -39,6 +39,55 @@ const DEFAULT_REPEAT_MAX = 3;
  */
 const MEMORY_STOP_PCT = 90;
 const MEMORY_HEAVY_PCT = 95;
+/**
+ * 一轮的结果判定。**白名单**，不是黑名单。
+ *
+ * 为什么必须白名单：原来的 `reason !== 'error' ? true : false` 会把
+ * `aborted`（用户中断）、`interrupted`（进程被杀）、`max-tokens`（答到一半截断）、
+ * `quota`（额度耗尽）全部记成成功。蒸馏时这些会被当成「这条做法有效」的证据，
+ * 于是把一次失败固化成技能。判错的代价比不判大得多。
+ *
+ * 返回：true / false / null（未知，蒸馏时排除）
+ */
+export function outcomeOf(reason) {
+  switch (reason) {
+    case 'completed':
+    case 'user':            // 模型正常答完，用户没打断
+    case 'stop':
+      return true;
+    case 'error':
+    case 'failed':
+    case 'aborted':
+    case 'interrupted':
+    case 'cancelled':
+    case 'max-tokens':
+    case 'quota':
+      return false;
+    default:
+      return null;          // 未知一律不猜
+  }
+}
+
+/**
+ * 脱敏：凭证、Authorization、URL 里的 token、常见环境变量赋值。
+ *
+ * 为什么在写入前做：trace 会长期留存并参与蒸馏，一旦把密钥写进去，
+ * 它会跟着备份、日志、导出的技能一起扩散，删都删不干净。
+ * 这是「写入前过滤」而不是「展示时打码」——后者原文还在文件里。
+ */
+export function redact(text) {
+  return String(text ?? '')
+    // sk-xxxx / ghp_xxxx / AKIA... 等常见凭证前缀
+    .replace(/\b(sk|ghp|gho|ghs|ghu|glpat|xox[abp])[-_][A-Za-z0-9_-]{16,}/gi, '[REDACTED_KEY]')
+    .replace(/\bAKIA[0-9A-Z]{16}\b/g, '[REDACTED_AWS_KEY]')
+    // Authorization: Bearer xxx / api_key=xxx / token=xxx
+    .replace(/\b(authorization|api[_-]?key|access[_-]?token|bearer|token|password|secret)\b\s*[:=]\s*\S+/gi, '$1=[REDACTED]')
+    // URL query 里的 token/key/sig
+    .replace(/([?&](?:token|key|sig|signature|access_token)=)[^&\s]+/gi, '$1[REDACTED]')
+    // 环境变量赋值形式 FOO_SECRET=xxx
+    .replace(/\b[A-Z_]*(?:SECRET|TOKEN|KEY|PASSWORD)[A-Z_]*\s*=\s*\S+/g, '[REDACTED_ENV]');
+}
+
 /** 这些工具名说明"在派活"，派之前要查负载、派之后要记账。 */
 const DISPATCH_TOOL_PATTERN = /^(subagent|wb_submit_task|wb_task_status)$/;
 
@@ -52,9 +101,25 @@ function sessionId(session) {
   return String(session?.header?.id ?? session?.id ?? 'unknown');
 }
 
-/** 追加一行 JSON。写失败不抛 —— 记账是副产物，坏了不该影响对话。 */
-function appendJsonl(file, obj) {
+/**
+ * 带体积上限的追加：文件超过 maxBytes 就轮转成 .1，旧 .1 丢弃。
+ *
+ * 为什么必须有：trace 是长期追加的，几周后能到几十 MB。它会被蒸馏读、
+ * 会被备份带走、会在手机上占空间。只保留最近一段就够——「三个月前的
+ * 一次失败」对现在提炼技能的价值已经很低，而且过期经验还可能误导。
+ *
+ * 轮转而不是删除：留着上一代方便回查最近的历史，同时总量有硬上限。
+ */
+function appendJsonlBounded(file, obj, { maxBytes = 2 * 1024 * 1024 } = {}) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
+  try {
+    const stat = fs.statSync(file, { throwIfNoEntry: false });
+    if (stat && stat.size >= maxBytes) {
+      const prev = `${file}.1`;
+      try { fs.rmSync(prev, { force: true }); } catch { /* 旧文件删不掉不影响写入 */ }
+      try { fs.renameSync(file, prev); } catch { /* 改名失败就继续追加，宁可超一点 */ }
+    }
+  } catch { /* stat 失败按未超限处理 */ }
   fs.appendFileSync(file, JSON.stringify(obj) + '\n', { mode: 0o600 });
 }
 
@@ -281,7 +346,14 @@ export default class AutoGuard {
       const pending = pendingOutbox(state);
       if (!pending.length) return;
       for (const event of pending.slice(0, 5)) {   // 一次最多 5 条，避免刷屏
-        this.notify(event.message, { ...(event.detail ?? {}), kind: event.kind, taskId: event.taskId, session: sessionId(session) });
+        // eventId 跟着走：main.mjs 透传进 notices.jsonl，App 按 id 去重。
+        this.notify(event.message, {
+          ...(event.detail ?? {}),
+          eventId: event.eventId,
+          kind: event.kind,
+          taskId: event.taskId,
+          session: sessionId(session),
+        });
         ackTaskEvent(state, event.eventId);
       }
       saveTasks(state, this.dataDir());
@@ -392,21 +464,36 @@ export default class AutoGuard {
       const events = typeof session?.ownEvents === 'function' ? session.ownEvents() : session?.events;
       const list = Array.isArray(events) ? events : [];
 
-      // 从本轮起点往回找摘要材料。只取有内容的文本块，跳过工具参数之类。
+      // ⚠ 只扫**本轮**：从最后一个 turn/start 往后。
+      // 之前的实现对整个会话历史取「最后一条 user / assistant」，导致上一轮的
+      // 内容被当成这一轮的摘要——交错两轮之后，trace 记的是旧任务，蒸馏出来
+      // 的「经验」指向错误的事件。会话越长，错得越隐蔽。
+      let start = -1;
+      for (let i = list.length - 1; i >= 0; i -= 1) {
+        if (list[i]?.type === 'turn/start') { start = i; break; }
+      }
+      const current = start >= 0 ? list.slice(start) : list;
+
       const tools = [];
       let userText = '';
       let assistantText = '';
-      for (const e of list) {
+      for (const e of current) {
         if (e?.type === 'tool/ptc-dispatch' && typeof e.data?.name === 'string') {
           if (!tools.includes(e.data.name)) tools.push(e.data.name);
         } else if (e?.type === 'user/message') {
           for (const b of e.data?.content ?? []) {
             if (b?.type === 'text' && typeof b.text === 'string' && !b.text.startsWith('[')) {
-              userText = b.text;   // 取最后一条用户消息
+              // 本轮可能有多条用户消息（中途补充要求），用最后一条作摘要；
+              // 但只在本轮范围内找，不会跳到上一轮去。
+              userText = b.text;
             }
           }
         } else if (e?.type === 'assistant/message') {
-          for (const b of e.data?.content ?? []) {
+          // 正文在 data.message.content 里，不是 data.content。
+          // 早先写成 data.content 时，assistant 文本永远取不到，摘要静默退化成
+          // 用户那句话——看起来「有记录」，实际记的不是模型的结论。
+          const content = e.data?.message?.content ?? e.data?.content;
+          for (const b of content ?? []) {
             if (b?.type === 'text' && typeof b.text === 'string') {
               assistantText = assistantText ? assistantText + ' ' + b.text : b.text;
             }
@@ -417,11 +504,15 @@ export default class AutoGuard {
       const summary = assistantText || userText;
       if (!summary) return;   // 空轮次没必要记
 
-      appendJsonl(this.traceFile(), {
+      appendJsonlBounded(this.traceFile(), {
         at: Date.now(),
         kind: 'task',
-        ok: reason === 'error' ? false : true,
-        summary: summary.replace(/\s+/g, ' ').trim().slice(0, 300),
+        // 成功判定用白名单：只有明确正常结束才算成功。
+        // 原来的 `reason !== 'error'` 把 aborted / interrupted / max-tokens / quota
+        // 全算成成功，蒸馏时会「学到」错误的做法。
+        ok: outcomeOf(reason),
+        reason: reason ?? 'unknown',
+        summary: redact(summary.replace(/\s+/g, ' ').trim()).slice(0, 300),
         // 用话题标签而不是工具名：见 TOPIC_RULES 的注释。
         tags: topicsOf(summary + ' ' + userText),
         tools: tools.slice(0, 6),
