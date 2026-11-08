@@ -34,7 +34,9 @@ private struct GenUINode: View {
                 children(spacing: 10)
             }
             .padding(14)
-            .background(Palette.grouped, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            // 卡片走液态玻璃：面板是“浮在对话上”的一层，玻璃材质天然合适，
+            // 也和输入条、引导页统一了语言。
+            .glassCard(radius: 22, .panel)
         case "h1", "h2", "h3", "h4", "h5", "h6":
             Text(text).font(name == "h1" ? .title2.bold() : name == "h2" ? .title3.bold() : .headline)
         case "Text", "span", "p", "TinyText", "label":
@@ -47,9 +49,34 @@ private struct GenUINode: View {
         case _ where name.hasPrefix("TinyHuicharts") || name.hasPrefix("TinyChart"):
             ChartView(kind: name, options: props["options"].isNull ? props : props["options"])
         case "TinyTag", "Tag":
-            Text(text).font(.caption).padding(.horizontal, 8).padding(.vertical, 3).background(Palette.bubble, in: Capsule())
+            Text(text).font(.caption)
+                .padding(.horizontal, 9).padding(.vertical, 4)
+                .glassPill(.floating)
         case "TinyDivider", "hr":
             Divider()
+        // ── 长任务反馈：AI 跑多步任务时给一条进度，用户不用盯着空白等 ──
+        case "TinyProgress", "Progress", "progress":
+            GenProgress(
+                value: props["value"].double ?? props["percent"].double.map { $0 / 100 } ?? 0,
+                label: props["label"].string ?? props["text"].string,
+                indeterminate: props["indeterminate"].bool == true
+            )
+        // ── 迷你趋势：用量、耗时、次数这类一维序列，不占地方 ──
+        case "TinySparkline", "Sparkline", "sparkline":
+            GenSparkline(
+                values: (props["values"].array ?? props["data"].array).compactMap { $0.double },
+                label: props["label"].string,
+                suffix: props["suffix"].string
+            )
+        // ── 滑块：让用户直接给个数值，胜过让他打一句话 ──
+        case "TinySlider", "Slider", "slider":
+            GenSlider(
+                label: props["label"].string ?? "调整",
+                lower: props["min"].double ?? 0,
+                upper: props["max"].double ?? 100,
+                initial: props["value"].double,
+                suffix: props["suffix"].string
+            )
         case "img", "Image", "TinyImage":
             if let src = props["src"].string, let url = URL(string: src) {
                 AsyncImage(url: url) { $0.resizable().scaledToFit() } placeholder: { ProgressView() }
@@ -162,4 +189,150 @@ private struct ChartView: View {
             .frame(height: 220)
         }
     }
+}
+
+// MARK: - 液态玻璃面板组件
+
+/// 进度条。AI 跑多步任务时用它替代「正在思考…」的空洞等待。
+///
+/// 为什么要有 indeterminate：工具调用常常拿不到总步数，
+/// 这时候画一条在动的玻璃轨道，比假装知道百分比更诚实。
+private struct GenProgress: View {
+    let value: Double
+    let label: String?
+    let indeterminate: Bool
+    @State private var sweep = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack {
+                if let label {
+                    Text(label).font(.footnote.weight(.medium))
+                }
+                Spacer()
+                if !indeterminate {
+                    Text("\(Int((value.clamped01) * 100))%")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(Palette.secondary)
+                }
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Palette.control)
+                    if indeterminate {
+                        Capsule()
+                            .fill(Palette.ink)
+                            .frame(width: geo.size.width * 0.32)
+                            .offset(x: sweep ? geo.size.width * 0.68 : 0)
+                            .onAppear {
+                                withAnimation(.easeInOut(duration: 1.25).repeatForever(autoreverses: true)) {
+                                    sweep = true
+                                }
+                            }
+                    } else {
+                        Capsule()
+                            .fill(Palette.ink)
+                            .frame(width: max(0, geo.size.width * value.clamped01))
+                            .animation(.smooth(duration: 0.4), value: value)
+                    }
+                }
+            }
+            .frame(height: 6)
+        }
+        .padding(14)
+        .glassCard(radius: 18, .panel)
+    }
+}
+
+/// 迷你折线：一维数字序列的走势。用 Charts 会带来坐标轴、图例这些噪音，
+/// 面板里的迷你图只要「形状」，所以直接手绘。
+private struct GenSparkline: View {
+    let values: [Double]
+    let label: String?
+    let suffix: String?
+
+    private var range: (min: Double, max: Double) {
+        guard let lo = values.min(), let hi = values.max(), hi > lo else { return (0, 1) }
+        return (lo, hi)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                if let label {
+                    Text(label).font(.footnote.weight(.medium))
+                }
+                Spacer()
+                if let last = values.last {
+                    Text(format(last))
+                        .font(.caption.monospacedDigit().weight(.semibold))
+                        .foregroundStyle(Palette.ink)
+                }
+            }
+            GeometryReader { geo in
+                let span = range.max - range.min
+                let stepX = values.count > 1 ? geo.size.width / CGFloat(values.count - 1) : 0
+                Path { path in
+                    for (index, v) in values.enumerated() {
+                        let y = geo.size.height - CGFloat((v - range.min) / (span == 0 ? 1 : span)) * geo.size.height
+                        let point = CGPoint(x: CGFloat(index) * stepX, y: y)
+                        if index == 0 { path.move(to: point) } else { path.addLine(to: point) }
+                    }
+                }
+                .stroke(Palette.ink, style: StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round))
+            }
+            .frame(height: 40)
+        }
+        .padding(14)
+        .glassCard(radius: 18, .panel)
+    }
+
+    private func format(_ value: Double) -> String {
+        let text = value == value.rounded() ? String(Int(value)) : String(format: "%.1f", value)
+        return text + (suffix ?? "")
+    }
+}
+
+/// 滑块：把「给我个数值」变成一次拖动。
+///
+/// 为什么不做成可提交的表单：这个渲染器是无状态的（交互留在网页版），
+/// 所以滑块只负责让用户看清区间和当前值，真正的提交由 AI 下一轮问。
+private struct GenSlider: View {
+    let label: String
+    let lower: Double
+    let upper: Double
+    let initial: Double?
+    let suffix: String?
+    @State private var value: Double
+    @State private var ready = false
+
+    init(label: String, lower: Double, upper: Double, initial: Double?, suffix: String?) {
+        self.label = label
+        self.lower = lower
+        self.upper = upper
+        self.initial = initial
+        self.suffix = suffix
+        _value = State(initialValue: initial ?? (lower + upper) / 2)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(label).font(.footnote.weight(.medium))
+                Spacer()
+                Text("\(Int(value))\(suffix ?? "")")
+                    .font(.caption.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(Palette.secondary)
+            }
+            Slider(value: $value, in: lower...max(lower + 0.0001, upper))
+                .tint(Palette.ink)
+                .onAppear { ready = true }
+        }
+        .padding(14)
+        .glassCard(radius: 18, .panel)
+    }
+}
+
+private extension Double {
+    var clamped01: Double { min(max(self, 0), 1) }
 }
