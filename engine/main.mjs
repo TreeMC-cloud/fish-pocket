@@ -15,6 +15,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
 import { PRELOAD } from './runtime/real-paths.mjs';
+import { createNoticeAdmission } from './runtime/notice-admission.mjs';
+import { reportInterrupted } from './runtime/flight-recorder.mjs';
 
 const data = process.env.DSH_IOS_DATA;
 if (!data) throw new Error('DSH_IOS_DATA is not set');
@@ -108,10 +110,18 @@ console.log(`[dsh-ios] node ${process.version} ${process.platform}/${process.arc
 let engine;
 let restarting = false;
 let crashes = 0;
+const admitNotice = createNoticeAdmission();
 
 function start() {
   fs.rmSync(urlFile, { force: true });
   published = false;
+  // 上一代引擎留下的「正在跑」记录 = 被崩溃/重启打断的任务。
+  // 必须在新引擎起来之前读走并清空：新引擎一启动就会覆盖写这个文件，
+  // 那时残留就没了，用户也永远不知道刚才那个任务断了。
+  const interrupted = reportInterrupted(data);
+  if (interrupted.length > 0) {
+    console.warn(`[dsh-ios] ${interrupted.length} task(s) were interrupted by the restart`);
+  }
   const startedAt = Date.now();
   engine = new Worker(new URL('./boot.mjs', import.meta.url), {
     env,
@@ -121,19 +131,31 @@ function start() {
   });
   engine.on('message', (message) => {
     if (message?.type === 'dsh-ios/restart') void restart(message.reason);
-    // 自动守卫的提醒：写进 engine.log，用户能在「关于 → 引擎日志」里看到。
-    // 不弹 toast 是有意的——这些提醒是"该做什么了"，不是错误，
-    // 频繁弹窗会让人关掉通知，反而什么都看不到。
+    // 自动守卫提醒先经过准入器：actionable allowlist + 每会话冷却，
+    // 普通日志只留 engine.log，不进入用户 toast 通道。
     if (message?.type === 'dsh-ios/notice') {
       console.warn(`[auto-guard] ${message.level ?? 'info'}: ${message.message ?? ''}`);
+      if (admitNotice(message)) {
+        const record = {
+          kind: 'notice',
+          message: message.message,
+          detail: message.detail ?? null,
+          time: Date.now(),
+        };
+        try {
+          fs.appendFileSync(path.join(data, 'notices.jsonl'), JSON.stringify(record) + '\n', { mode: 0o600 });
+        } catch (error) {
+          console.error('[dsh-ios] notice write failed', error?.message ?? error);
+        }
+      }
     }
     // 引擎里做的网页/文件想让用户在 App 里直接看：写一条 kind=preview 的通知。
     // 为什么走这个通道而不是新开一条 RPC：notices.jsonl 已经是引擎到 App 的现成
     // 单向通道（App 每 3 秒读一次），复用只多一个字段，不用改两边的协议。
     if (message?.type === 'dsh-ios/preview') {
-      const path = message.path;
-      if (typeof path === 'string' && path.length > 0) {
-        const record = { kind: 'preview', title: message.title ?? '', path, time: Date.now() };
+      const previewPath = message.path;
+      if (typeof previewPath === 'string' && previewPath.length > 0) {
+        const record = { kind: 'preview', title: message.title ?? '', path: previewPath, time: Date.now() };
         try {
           fs.appendFileSync(
             path.join(data, 'notices.jsonl'),
