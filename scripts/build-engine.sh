@@ -132,9 +132,13 @@ echo "engine: $out ($((before/1024)) MB -> $((after/1024)) MB)"
 #   openai / @anthropic-ai/sdk / @google/genai ← @earendil-works/pi-ai 引用（LLM 供应商库，必需）
 #   sql.js ← just-bash 静态 require（bundle 第一屏，必需）
 #   @smithy ← @aws-sdk/* 24 个包引用（aws-sdk 是 pi-ai 的传递依赖）
-#   typescript / pnpm ← 全树真正零引用（typescript 只是 devDependencies，pnpm 只被
-#   dsh plugin add CLI 转发），这两个删除安全。
-rm -rf "$nm"/typescript "$nm"/pnpm
+#   typescript ← 全树零引用（只是 devDependencies），删除安全。
+#
+# 教训：pnpm 曾经也在这里被删掉，理由是「只被 dsh plugin add 转发、App 内用不到」。
+# 这个判断是错的 —— 用户在 App 里装插件（如 archify）正是真实场景，
+# 删掉之后 /bin/pnpm 变成两行注释的空壳，装包直接 MODULE_NOT_FOUND。
+# 现在只删 typescript，pnpm 必须留着。
+rm -rf "$nm"/typescript
 # 剪枝后冒烟必须放在这里：验证的是“最终形态”（物化目录 + 无链接 + 已裁剪），
 # CI 验证过的树 ≠ 打进 .app 的树，真机跑的是后者。
 # dsh-web 是必须测的：它从 dsh-llm import HarnessError，最小 shim 时代就是它先炸。
@@ -152,6 +156,10 @@ rm -rf "$nm"/typescript "$nm"/pnpm
   await import('debug');
   await import('human-signals');
   await import('@opentelemetry/api-logs');
+  // pnpm 是 App 内装插件的唯一通道（dsh plugin add → pnpm add）。
+  // 它被剪掉的后果是真机装插件报 MODULE_NOT_FOUND，而不是构建失败，
+  // 所以必须在这里挡住。
+  await import('pnpm');
   // pi-ai 是 LLM 供应商库（dsh-llm-deepseek 的底座），静态 import openai ——
   // 第六轮真机日志就是它炸的（Cannot find package 'openai'）。
   const pi = await import('@earendil-works/pi-ai');
