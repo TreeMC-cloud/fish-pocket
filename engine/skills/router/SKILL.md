@@ -1,6 +1,10 @@
 ---
 name: router
 description: 先判断这件事该自己干、派子 agent、还是问用户，再决定动手。任务不清楚或代价大时用。
+version: 1.0.0
+source: handwritten
+permissions: [read-only]
+
 ---
 
 # 命令台 —— 只分派，不代劳
