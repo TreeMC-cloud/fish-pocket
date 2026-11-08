@@ -357,6 +357,8 @@ struct ConversationView: View {
         // 把 Binding 抽成独立属性：内联的 get/set 闭包 + 三个修饰符串在一起，
         // Swift 的类型推断会超时（真机 CI 报过 "unable to type-check in reasonable time"）。
         .alert("出错了", isPresented: errorPresented) {
+            Button("换模型重试") { Haptics.tap(); Task { await self.model?.retryLastTurn(switchModel: true) } }
+            Button("重试") { Haptics.tap(); Task { await self.model?.retryLastTurn(switchModel: false) } }
             Button("好", role: .cancel) {}
         } message: {
             Text(model.error ?? "")
@@ -845,10 +847,24 @@ private struct TimelineRow: View, Equatable {
         case .assistant(let turn, let blocks, let started, let ended):
             AssistantTurnView(blocks: blocks, turn: turn, inProgress: inProgress, startedAt: started, endedAt: ended, regeneratePrompt: inProgress ? nil : prompt, info: info)
         case .notice(_, let text, let isError):
-            Label(text, systemImage: isError ? "exclamationmark.triangle" : "info.circle")
-                .font(.footnote)
-                .foregroundStyle(isError ? Palette.removed : Palette.secondary)
-                .frame(maxWidth: .infinity, alignment: .center)
+            VStack(spacing: 8) {
+                Label(text, systemImage: isError ? "exclamationmark.triangle" : "info.circle")
+                    .font(.footnote)
+                    .foregroundStyle(isError ? Palette.removed : Palette.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                // 一轮失败后只有一行灰字说明，没有任何可做的事：
+                // 「重新生成」挂在助手气泡上，而失败的轮次根本没有气泡。
+                // 这里给失败行补上重试入口（换模型/原样），不必让用户重敲一遍。
+                if isError, isLast, !inProgress {
+                    HStack(spacing: 10) {
+                        Button("重试") { Haptics.tap(); Task { await model.retryLastTurn(switchModel: false) } }
+                        Button("换模型重试") { Haptics.tap(); Task { await model.retryLastTurn(switchModel: true) } }
+                    }
+                    .font(.footnote.weight(.medium))
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+            }
         case .maxTokens:
             MaxTokensNotice(model: model)
         case .credential(_, let problem):
