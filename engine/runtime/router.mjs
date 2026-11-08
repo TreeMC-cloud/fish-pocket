@@ -25,7 +25,23 @@ import { gate as gateTask } from './delivery-gate.mjs';
 /** 默认并发：1。可被 config 覆盖，但不要在没有实测的情况下调高。 */
 export /** 同一原因连续失败到几次就判定「任务需要重新拆解」（移植自 kanban 的 MAX_BLOCKS） */
 const MAX_CONSECUTIVE_FAILURES = 2;
-const DEFAULT_MAX_CONCURRENT = 1;
+/**
+ * 默认并发。
+ *
+ * 取 4 不是拍的：BENCH-001 实测（200 个任务）
+ *   并发 1 → 213.6ms，并发 4 → 86.3ms，并发 20 → 78.3ms
+ * 4 已经拿到绝大部分收益，再往上提升很小而争用风险变大。
+ * iOS 单机单 Worker，并发太高只会让落盘互相排队。
+ */
+const DEFAULT_MAX_CONCURRENT = 4;
+/**
+ * 一个任务最多被「延后」几次。
+ *
+ * 存在的理由：会话没加载时任务是 retryable 的，会退回队列等下一轮。
+ * 但如果那个会话永远不加载（被删了、或者 agent 一直起不来），
+ * 没有上限就会无限空转。超过这个次数就当成真失败，交给人看。
+ */
+const MAX_DEFERRALS = 20;
 
 /** 任务优先级：用户直接下的最高，webhook 最低。数值越小越先跑。 */
 const PRIORITY = { user: 0, schedule: 1, 'agent-message': 2, webhook: 3 };
@@ -182,8 +198,12 @@ export class Router {
     const running = Object.values(state.tasks).filter((t) => t.status === 'running');
     const slots = this.maxConcurrent - running.length;
     if (slots <= 0) return [];
+    const now = this.now();
     const queued = Object.values(state.tasks)
       .filter((t) => t.status === 'queued')
+      // 延后过的任务要等冷却到期才重新排——否则 defer 回队列后
+      // 同一轮 execute() 立刻又把它捡起来，形成忙循环（把 CPU 和磁盘烧光）。
+      .filter((t) => !t.deferAfter || t.deferAfter <= now)
       .sort((a, b) => (PRIORITY[a.source] ?? 9) - (PRIORITY[b.source] ?? 9) || a.createdAt - b.createdAt);
     return queued.slice(0, slots);
   }
@@ -226,6 +246,44 @@ export class Router {
       // 取消优先于结果：用户说了停，慢半拍的成功也作废。
       // 否则取消是装饰——界面显示已取消，副作用实际照样发生。
       if (t.status !== 'running') return;
+
+      // 「现在做不了，稍后再试」和「失败」是两件事，必须分开。
+      // 会话没加载进内存（App 刚启动、会话被回收）属于前者：
+      // 如果按失败处理，任务会进 needs_reconciliation 等人工确认——
+      // 但它其实只要等一会儿自己就能跑。把可恢复的等待当成需要人介入的失败，
+      // 会让能力地图上堆满"需要核对"的假告警。
+      if (outcome?.retryable === true) {
+        // 退回队列：running → failed 是合法转移，再 needs_reconciliation → queued。
+        // 但那样会留下失败记录、也会累计改道计数，语义不对。
+        // 这里直接改回 queued —— 运行时状态修正，不是任务结论。
+        t.status = 'queued';
+        t.updatedAt = this.now();
+        t.leaseUntil = null;
+        t.heartbeatAt = null;
+        // 重试次数要记，否则一个永远加载不了的会话会让这个任务无限空转。
+        t.deferCount = (t.deferCount ?? 0) + 1;
+        // 冷却：指数退避，最多 5 分钟。会话没加载通常是"稍后会好"，
+        // 但也不能每 50ms 试一次——那等于空转。
+        const backoff = Math.min(5 * 60_000, 2_000 * 2 ** Math.min(t.deferCount - 1, 8));
+        t.deferAfter = this.now() + backoff;
+        if (t.deferCount >= MAX_DEFERRALS) {
+          // 等太多次了，说明不是"稍后就好"，是真的做不了。
+          t.status = 'running';
+          transition(after, task.taskId, 'failed', {
+            by: 'router', error: `延后 ${t.deferCount} 次仍无法执行：${outcome?.error ?? ''}`, now: this.now(),
+          });
+          transition(after, task.taskId, 'needs_reconciliation', { by: 'router', now: this.now() });
+          enqueue(after, {
+            kind: 'task_failed',
+            message: `任务「${t.title}」等了 ${t.deferCount} 轮仍无法执行：${String(outcome?.error ?? '').slice(0, 120)}`,
+            taskId: task.taskId,
+            detail: { kind: 'task_failed', taskId: task.taskId },
+          }, this.now());
+        }
+        save(after, this.dataDir);
+        return;
+      }
+
       if (outcome?.ok) {
         // 交付 gate：ok:true 只说明「没抛异常」，不等于「东西真的出来了」。
         // 不过 gate 就不算成功——改成 needs_reconciliation，让人看一眼。
