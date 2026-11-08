@@ -38,6 +38,9 @@ struct ConversationView: View {
     /// Approvals seen since none were waiting, for the 「1/3」 of the sheet.
     @State private var approvalBatch: Set<String> = []
     @State private var keyboardUp = false
+    /// 钉住的面板：收起了没有 / 用户关掉的是哪一块。
+    @State private var panelCollapsed = true
+    @State private var dismissedPanelId: String?
     @State private var composerFocused = false
     /// The new-conversation page's free height: a short one drops the headline.
     @State private var heroHeight: CGFloat = .infinity
@@ -177,6 +180,16 @@ struct ConversationView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
                 if blank && !composerFocused && model.composer.isEmpty { suggestions(model).padding(.bottom, 10) }
+                // 面板坞：AI 生成的面板钉在这儿，不随聊天滚走（收起态是一条玻璃胶囊）。
+                if let pinned = PanelDockPicker.latest(in: model.items), pinned.id != dismissedPanelId {
+                    PanelDock(
+                        node: pinned.node,
+                        title: pinned.title,
+                        collapsed: $panelCollapsed,
+                        dismiss: { withAnimation(.snappy(duration: 0.24)) { dismissedPanelId = pinned.id } }
+                    )
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                }
                 ComposerStatusBar(
                     model: model, keyboardUp: keyboardUp,
                     waiting: waitingInteraction(model).map { $0.isApproval ? String(localized: "等你允许") : String(localized: "等你回答") },
@@ -207,20 +220,13 @@ struct ConversationView: View {
         .modifier(ComposerDrop(composer: model.composer, enabled: model.subagentReadOnly(parentAvailable: parentAvailable(model)) == nil))
         // Under the toolbar: what is inside an inspector's main view does not reach the navigation bar.
         .inspector(isPresented: workbenchShown(sizeClass == .regular)) {
-            // Only where it is shown: on a phone this content stays built while closed, and its
-            // toolbar lands in the conversation's bar.
-            if sizeClass == .regular {
-                workbenchPage(model).inspectorColumnWidth(min: 320, ideal: 420, max: 640)
-            }
+            workbenchPage(model).inspectorColumnWidth(min: 320, ideal: 420, max: 640)
         }
         // It names the window in the iPad app switcher. Not drawn while the title is the principal
         // item; with the title moved aside for the workbench it would show as a second one.
         .navigationTitle(titleBesideWorkbench ? "" : app.durableTitle(of: sessionId) ?? "")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(Palette.background, for: .navigationBar)
-        // Stated, not left to the default: the workbench's files and changes hide the bar of
-        // their own stacks, and without this closing the sheet takes this bar along.
-        .toolbar(.visible, for: .navigationBar)
         .toolbar {
             if let openDrawer {
                 ToolbarItem(placement: .topBarLeading) { DrawerButton(action: openDrawer) }
@@ -871,7 +877,21 @@ private struct UserBubble: View {
                 .lineSpacing(3)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
+                // 用户气泡：实心墨色（黑白极简的骨架不动），只加玻璃的边缘高光，
+                // 让它和 AI 侧的玻璃面板在同一套材质语言里。
                 .background(Palette.bubble, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 22, style: Glass.corner)
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [.white.opacity(0.22), .clear, .black.opacity(0.10)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            ),
+                            lineWidth: 0.5
+                        )
+                }
+                .shadow(color: .black.opacity(0.12), radius: 14, y: 6)
                 .contextMenu {
                     Button { copyToPasteboard(text) } label: { Label("复制", systemImage: "doc.on.doc") }
                     // Masked text stays masked until the reader asks: this would show it whole.
