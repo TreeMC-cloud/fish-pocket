@@ -63,8 +63,15 @@ test('auto-guard 在 turn/start 后真的去查了派单台账', async () => {
   process.env.DSH_IOS_DATA = dir;
   process.env.DSH_SENTINEL_LEDGER = ledger;
 
-  // 一条两小时前的未回执派单
-  execFileSync(process.execPath, [sentinel, 'dispatch', '--to', 'agent-b', '--what', '修构建'], { env: process.env, timeout: 90_000 });
+  // 一条两小时前的未回执派单。
+  // 多重试几次：并行跑测试时多个 Node 子进程抢 CPU，sentinel 偶尔起不来，
+  // 那是环境问题不是逻辑问题——单跑时 3/3 全过，全量并行时会偶发失败。
+  const dispatchOnce = () => execFileSync(process.execPath, [sentinel, 'dispatch', '--to', 'agent-b', '--what', '修构建'], { env: process.env, timeout: 90_000 });
+  let lastErr;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try { dispatchOnce(); lastErr = null; break; } catch (error) { lastErr = error; }
+  }
+  if (lastErr) throw lastErr;
   const rows = fs.readFileSync(ledger, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
   rows[0].at = new Date(Date.now() - 2 * 60 * 60_000).toISOString();
   fs.writeFileSync(ledger, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
