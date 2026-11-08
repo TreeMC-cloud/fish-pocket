@@ -92,7 +92,7 @@ export function countOccurrences(haystack, needle) {
  *   wasValid  调用方已知原文件是否合法；传了就不再自己判断
  * @returns {{ok:boolean, stage?:string, message?:string, bytes?:number, newErrors?:Array}}
  */
-export function safeEdit(filePath, oldStr, newStr, { skipLint = false, wasValid = null } = {}) {
+export function safeEdit(filePath, oldStr, newStr, { skipLint = false, wasValid = null, dryRun = false } = {}) {
   // 临时文件必须**保留原扩展名**：`node --check` 靠扩展名决定按 ESM 还是 CJS 解析。
   // 命名成 xxx.mjs.safe-edit.123.tmp 会被当成 CommonJS，一行 export 就报
   // "Unexpected token 'export'"，把正常编辑也拦掉（实测踩过）。
@@ -165,7 +165,15 @@ export function safeEdit(filePath, oldStr, newStr, { skipLint = false, wasValid 
       }
     }
 
-    // 7) 原子落盘
+    // 7) 原子落盘（或 dryRun 只回报结果）
+    //
+    // dryRun 的用途：工具层的 pre-execute 钩子只能**拦截或放行**，不能替工具执行。
+    // 所以那里先试改一遍（写临时文件、验语法），通过才让真正的工具去改。
+    // 代价是同一处改动被计算两次，换来的是一旦失败文件根本没被动过。
+    if (dryRun) {
+      return { ok: true, bytes: Buffer.byteLength(edited, 'utf8'), dryRun: true };
+    }
+
     try {
       fs.renameSync(tmpPath, filePath);
     } catch (error) {
