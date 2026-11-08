@@ -77,6 +77,11 @@ final class SessionModel {
     /// Every projection value of the latest snapshot or refresh, for the composer docks.
     private(set) var projectionValues: [String: JSON] = [:]
     var error: String?
+    /// 上一轮的失败码（`turn/end` 的 `reason.error.code`），供自动切换判定用；
+    /// 一次新的 turn 开始或成功结束就清掉，避免拿陈旧的失败原因反复换模型。
+    private(set) var lastFailureCode: String?
+    /// 自动换模型已经试过一次：同一轮不再第二次，防止两个模型互相甩锅时无限循环。
+    private var autoSwitchedThisTurn = false
     /// A subagent's parent-scoped address; the Host refuses a plain session address
     /// for a child, and its messages and stops go through the parent. Set before `start()`.
     var subagentAddress: JSON?
@@ -174,11 +179,21 @@ final class SessionModel {
             // Only a live turn end prompts for quota or support; history replays never do.
             if event["type"].string == "turn/end" {
                 if let failure = TurnFailure(reason: event["data"]["reason"]) {
+                    lastFailureCode = failure.code
                     if failure.isQuota { app.account.reportQuota(code: failure.code ?? "QUOTA") }
                     // A key that stopped working is the conversation's card to explain; none at all is the first step.
                     if failure.credentialProblem == .missing { app.requestCredentials(.start) }
+                    // 模型这一侧走不通（限流、上游 5xx、超时、传输断、空回复、额度、密钥）
+                    // 时先自己换一个模型重发一次，而不是把一轮白跑的结论丢给用户。
+                    // 上下文超限不在此列：那是要压缩历史，换模型只是把问题藏起来。
+                    if !autoSwitchedThisTurn, failure.isModelUnreachable, subagentAddress == nil {
+                        // apply 是同步的（单帧循环里调用），异步的换模型重发要抛到外面跑。
+                        // 标记在 autoRetryOnAlternateModel 内部置位：它还要判断能否真的换。
+                        Task { [weak self] in await self?.autoRetryOnAlternateModel() }
+                    }
                 } else if event["data"]["reason"]["kind"].string == "completed", subagentAddress == nil, hasReply,
                           queued.isEmpty, composer.text.isEmpty {
+                    lastFailureCode = nil
                     app.noteCompletedTurn()
                 }
             }
@@ -397,6 +412,9 @@ final class SessionModel {
         var content: [JSON] = images.map { ["type": "image", "mediaType": .string($0.mediaType), "data": .string($0.data), "name": .string($0.name)] }
         if !outgoing.isEmpty { content.append(["type": "text", "text": .string(outgoing)]) }
         guard !content.isEmpty else { return }
+        // 用户亲手发的消息：这才是「新的一轮」，允许再次自动换模型。
+        // 必须在 prompt 之前清，自动重试走的是 prompt 而非 send，不会把自己清掉。
+        autoSwitchedThisTurn = false
         do {
             try await prompt(content: content, steer: steer, requestId: UUID().uuidString.lowercased())
         } catch let error as EngineError where error.code == "session/writer-held" {
@@ -623,6 +641,62 @@ final class SessionModel {
     func selectModel(_ choice: ModelChoice, effort: String?) async {
         do { try await applyModel(provider: choice.provider, model: choice.model, effort: effort) }
         catch { self.error = error.localizedDescription }
+    }
+
+    /// 模型失败后的恢复路径：拿到一个和当前不同的可用模型，没有则 nil。
+    /// 目录可能还没加载（例如会话刚恢复就失败），先确保加载。
+    func alternateModel() async -> ModelChoice? {
+        guard let catalog = modelCatalog else { return nil }
+        await catalog.loadCatalog(self)
+        return catalog.alternateModel(self)
+    }
+
+    /// 自动恢复：换一个模型重发上一轮，并留一条提示说明换到了哪个。
+    ///
+    /// 只做一次（`autoSwitchedThisTurn`）。两个模型都不通时不再来回换——
+    /// 那会变成静默的无限重试，用户看到的是「一直转圈但什么都没发生」。
+    @discardableResult
+    func autoRetryOnAlternateModel() async -> Bool {
+        // 一进来就置位：这次判定本身算作「已用过自动恢复」，
+        // 即便换无可换也不该在下一帧重复尝试同一件事。
+        autoSwitchedThisTurn = true
+        guard let last = lastUserMessage() else { return false }
+        guard let alt = await alternateModel() else {
+            // 目录里只有一个模型：换无可换，交给错误弹窗。
+            return false
+        }
+        do { try await applyModel(provider: alt.provider, model: alt.model, effort: nil) }
+        catch { return false }
+        // 不能往 items 里 append：items 是 timeline.items 的投影，下一帧就被覆盖。
+        // 用 toast 说明换了哪个模型，用户才知道后面的回答不是原来那个模型给的。
+        app.showToast(String(localized: "当前模型无法使用，已自动切换到 \(alt.name) 重试"), duration: 5)
+        await send(text: last.text)
+        // send 会把标记清成 false（它是「用户亲手发消息」的入口，这里复用了它），
+        // 所以重发之后再置回 true：第二个模型也不通时不再换，避免两个模型无限互相甩锅。
+        autoSwitchedThisTurn = true
+        return true
+    }
+
+    /// 最后一次用户发言：自动重试要重发的就是它。
+    /// 不能直接用 `items.last`——失败后末尾是那条 notice/credential 提示。
+    private func lastUserMessage() -> (text: String, attachments: [Attachment])? {
+        for item in items.reversed() {
+            if case let .user(_, text, attachments, _) = item { return (text, attachments) }
+        }
+        return nil
+    }
+
+    /// 失败后的重试。`switchModel` 为 true 时先切到目录里另一个模型再重发，
+    /// 否则用当前模型原样重发。返回 false 表示没有可重发的消息（最后一条不是用户发的）。
+    @discardableResult
+    func retryLastTurn(switchModel: Bool) async -> Bool {
+        guard let last = lastUserMessage() else { return false }
+        if switchModel, let alt = await alternateModel() {
+            do { try await applyModel(provider: alt.provider, model: alt.model, effort: nil) }
+            catch { /* 换不成就用原模型重试 */ }
+        }
+        await send(text: last.text)
+        return true
     }
 
     func applyModel(provider: String, model: String, effort: String?) async throws {
