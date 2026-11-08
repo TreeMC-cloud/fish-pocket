@@ -239,6 +239,7 @@ struct FileContentView: View {
                 case .markdown: markdown
                 case .image: if let localURL { ZoomableImage(url: localURL).id(revision) }
                 case .webImage: if let localURL { InlineImageWebView(url: localURL).id(revision) }
+                case .web: if let localURL { PageWebView(url: localURL).id(revision) }
                 case .pdf: if let localURL { PDFPreview(url: localURL).id(revision) }
                 case .unsupported: unsupported
                 }
@@ -552,7 +553,9 @@ struct FileContentView: View {
 
 /// How a file can be shown, picked by name as the web's preview registry does.
 enum FileRenderer: Hashable {
-    case text, markdown, image, webImage, pdf, unsupported
+    /// `web`: 真渲染的网页（html/htm）。和 `webImage` 不同——那个是把 svg/gif
+    /// 当图片塞进 Image 视图，html 需要整页渲染（脚本、样式、相对资源）。
+    case text, markdown, image, webImage, web, pdf, unsupported
 
     var pagesText: Bool { self == .text || self == .markdown }
 
@@ -561,6 +564,7 @@ enum FileRenderer: Hashable {
         case .text: "纯文本"
         case .markdown: "Markdown"
         case .image, .webImage: "图片"
+        case .web: "网页"
         case .pdf: "PDF"
         case .unsupported: "快速查看"
         }
@@ -580,6 +584,9 @@ enum FileRenderer: Hashable {
     static func candidates(for name: String) -> [FileRenderer] {
         let ext = (name as NSString).pathExtension.lowercased()
         if ext == "md" || ext == "markdown" { return [.markdown, .text] }
+        // 网页默认真渲染，但保留「源码」作为第二种打开方式——
+        // 改代码的时候要看源码。
+        if ext == "html" || ext == "htm" || ext == "xhtml" { return [.web, .text] }
         if ext == "svg" { return [.webImage, .text] }
         if ext == "gif" { return [.webImage] }
         if images.contains(ext) { return [.image] }
@@ -764,6 +771,47 @@ struct InlineImageWebView: UIViewRepresentable {
     }
 
     func updateUIView(_ view: WKWebView, context: Context) {}
+}
+
+/// 真渲染一张本地网页：脚本、样式、相对路径资源都按浏览器的方式来。
+///
+/// 和 `InlineImageWebView` 的区别：那个是为 svg/gif 做的，禁用 JS 并把字节
+/// 塞成 data URL；网页需要相反的东西——允许 JS、按文件位置解析相对路径，
+/// 否则一个引用 ./style.css 的页面会一片空白。
+struct PageWebView: UIViewRepresentable {
+    let url: URL
+
+    func makeUIView(context: Context) -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        configuration.defaultWebpagePreferences.allowsContentJavaScript = true
+        let view = WKWebView(frame: .zero, configuration: configuration)
+        view.navigationDelegate = context.coordinator
+        // 网页有自己的背景色，别让它透出 App 的底色。
+        view.isOpaque = true
+        view.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+        return view
+    }
+
+    func updateUIView(_ view: WKWebView, context: Context) {
+        guard view.url != url else { return }
+        view.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator: NSObject, WKNavigationDelegate {
+        /// 站内文件链接留在预览里跳转；外链交给系统浏览器。
+        /// 不这样处理的话，点页面里任何一个外链都会把预览变成浏览器，
+        /// 用户就回不到他原本在看的那个文件了。
+        func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+            guard let target = action.request.url else { return decisionHandler(.allow) }
+            if target.isFileURL || action.navigationType != .linkActivated {
+                return decisionHandler(.allow)
+            }
+            UIApplication.shared.open(target)
+            decisionHandler(.cancel)
+        }
+    }
 }
 
 /// PDFKit: selectable text, pinch zoom, continuous pages.
