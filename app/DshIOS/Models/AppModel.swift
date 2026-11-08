@@ -190,6 +190,9 @@ final class AppModel {
     @ObservationIgnored private var noticeLine = 0
     /// 已消费过的事件 id（引擎 outbox 按「至少一次」投递，重投靠它去重）。
     @ObservationIgnored private var seenNoticeIds: Set<String> = []
+    /// 引擎治理层的运行状态快照（`capability.json`）。空值时面板显示「还没有活动」。
+    private(set) var capability: CapabilityStatus?
+    @ObservationIgnored private var capabilityTask: Task<Void, Never>?
     @ObservationIgnored private var noticeTask: Task<Void, Never>?
 
     init(launchURL: URL) {
@@ -216,8 +219,33 @@ final class AppModel {
             // 这里轮询读出来弹 toast。为什么走文件而不是直接调用：
             // 插件跑在 Node worker 里，碰不到 SwiftUI；文件是两边都能碰的地方。
             watchAutoGuardNotices()
+            watchCapabilityStatus()
         } catch {
             lastError = error.localizedDescription
+        }
+    }
+
+    /// 轮询引擎写的能力状态快照（`capability.json`），供「能力面板」显示。
+    ///
+    /// 和 notices 用同样的 3 秒节奏：两个文件都由引擎侧写、App 侧读，
+    /// 分成两个循环是因为它们用途不同——notices 要逐条弹一次，
+    /// capability 只是最新的一个整体状态，读到最后一份覆盖即可。
+    private func watchCapabilityStatus() {
+        guard capabilityTask == nil else { return }
+        let url = EnginePaths.real(EnginePaths.shared).appendingPathComponent("capability.json")
+        capabilityTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(3))
+                guard let self else { return }
+                // 读盘 + 解码都放后台：每 3 秒在主线程解 JSON 会卡滚动。
+                let decoded = await Task.detached(priority: .utility) { () -> CapabilityStatus? in
+                    guard let data = try? Data(contentsOf: url) else { return nil }
+                    return try? JSONDecoder().decode(CapabilityStatus.self, from: data)
+                }.value
+                // 读不到就保持上一次的值，不要清空——引擎重启时文件可能短暂不存在，
+                // 抖成"还没有活动"会误导用户以为记录丢了。
+                if let decoded { self.capability = decoded }
+            }
         }
     }
 
