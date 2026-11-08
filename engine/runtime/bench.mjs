@@ -89,15 +89,19 @@ function benchIdempotentDuplicates(n) {
   });
 }
 
-/** 4. 并发调度：不同并发上限下跑完 n 个任务 */
-async function benchConcurrency(n, maxConcurrent) {
+/**
+ * 4. 并发调度：不同并发上限下跑完 n 个任务。
+ * @param taskMs 每个任务体的耗时（默认 5ms，模拟一次工具调用）。
+ *               传 0 得到"调度底噪"——没有它就无法区分「并行生效」和「IO 开销占大头」。
+ */
+async function benchConcurrency(n, maxConcurrent, taskMs = 5) {
   const rounds = 3;
   const samples = [];
   for (let r = 0; r < rounds; r += 1) {
     const router = new Router({
       dataDir: tmp(),
       maxConcurrent,
-      runTask: async () => { await new Promise((res) => setTimeout(res, 5)); return { ok: true }; },
+      runTask: async () => { if (taskMs > 0) await new Promise((res) => setTimeout(res, taskMs)); return { ok: true }; },
     });
     for (let i = 0; i < n; i += 1) router.accept({ source: 'user', eventId: `c${i}`, title: `任务 ${i}` });
     const start = process.hrtime.bigint();
@@ -123,8 +127,13 @@ async function main() {
   results['任务生命周期（含落盘）'] = { ...benchTaskLifecycle(TASKS), n: TASKS, unit: 'ms' };
   results['任务建表（纯内存）'] = { ...benchTaskMemoryOnly(TASKS), n: TASKS, unit: 'ms' };
   results['幂等去重（全重复）'] = { ...benchIdempotentDuplicates(TASKS), n: TASKS, unit: 'ms' };
+  // 对照组：任务体**完全不做事**，只测「20 次状态落盘 + 调度」的固定成本。
+  // 没有这个对照，看到「并发 4 比并发 1 快 2 倍」会误以为是并行生效——
+  // 实测任务的 5ms 延迟在总耗时里只占很小一部分，大头是每次 transition 的同步写盘。
+  results['调度底噪（任务零耗时）'] = { ...(await benchConcurrency(20, 1, 0)), n: 20, unit: 'ms' };
   results['并发调度 1'] = { ...(await benchConcurrency(20, 1)), n: 20, unit: 'ms' };
   results['并发调度 4'] = { ...(await benchConcurrency(20, 4)), n: 20, unit: 'ms' };
+  results['并发调度 20'] = { ...(await benchConcurrency(20, 20)), n: 20, unit: 'ms' };
 
   if (JSON_OUT) {
     console.log(JSON.stringify({ at: new Date().toISOString(), tasks: TASKS, results }, null, 2));
