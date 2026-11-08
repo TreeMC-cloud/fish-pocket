@@ -1,6 +1,10 @@
 ---
 name: toolbox
 description: 手上有哪些工具、什么场景该用哪个。不知道能用什么、或者要找某个能力时读。
+version: 1.0.0
+source: handwritten
+permissions: [read-only]
+
 ---
 
 # 零件库
