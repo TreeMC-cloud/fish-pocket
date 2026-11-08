@@ -15,15 +15,14 @@ struct CapabilityPage: View {
     var body: some View {
         Form {
             Section {
-                CapabilityPanel(status: app.capability)
-                    // 面板自带卡片底，放进 Form 里去掉双层面板感
-                    .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
-                    .listRowBackground(Color.clear)
+                CapabilityPanel(status: app.capability, bare: true)
+                    .padding(.vertical, 4)
             } header: {
                 Text("运行状态")
             } footer: {
                 Text("这些数字由引擎在后台写入，App 每 3 秒读一次。没跑过就显示「还没有记录」，不会显示成「一切正常」。")
             }
+            .groupedRow()
 
             Section {
                 ForEach(CapabilityCatalog.groups) { group in
@@ -45,10 +44,13 @@ struct CapabilityPage: View {
             } footer: {
                 Text("原生 DSH 靠 subprocess + sandbox 执行命令；iOS 禁止 fork/exec，所以执行层整套换掉了。其余原生自带的能力（workflow、subagent、schedule、goal、jobs、skill、present、MCP）不计入这里。")
             }
+            .groupedRow()
         }
         .navigationTitle("能力地图")
         .navigationBarTitleDisplayMode(.inline)
-        .groupedListStyle()
+        // 项目统一用 GroupedListStyle（.groupedList()）：insetGrouped + 玻璃行背景 +
+        // 52pt 行高下限。`.groupedListStyle()` 是 SwiftUI 在 iOS 上不存在的方法。
+        .groupedList()
     }
 }
 
@@ -86,9 +88,11 @@ struct CapabilityGroupPage: View {
                     Text(footer)
                 }
             }
+            .groupedRow()
         }
         .navigationTitle(group.title)
         .navigationBarTitleDisplayMode(.inline)
+        .groupedList()
     }
 }
 
@@ -188,12 +192,12 @@ enum CapabilityCatalog {
             items: [
                 Item(
                     name: "meow-memory 0.32.6",
-                    detail: "soul / user / project / fact / lesson / topic / rules 七张表。",
-                    state: .broken,
-                    note: "启动日志里有 ENOENT：lib/prompts/zh/tools.md 缺失，导致这个会话没有 memory_* 工具——记忆规则写了但没生效。"
+                    detail: "soul / user / project / fact / lesson / topic / rules 七张表，跨会话累积。",
+                    state: .working,
+                    note: "0.32.6 曾在打包时把 lib/prompts/*.md 当成文档剪掉，导致启动时读不到 zh/tools.md、整层没激活。已在打包脚本里保留 prompts 目录。"
                 ),
             ],
-            footer: "这一条是已知问题，正在处理；修好后状态会变成「生效」。"
+            footer: "如果状态回到「没生效」，先看启动日志里有没有 ENOENT 指向 prompts。"
         ),
         Group(
             title: "治理层（本机新增）",
