@@ -1,0 +1,210 @@
+import SwiftUI
+
+/// 设置里的「能力地图」：治理层在后台做了什么，一次看全。
+///
+/// 为什么单独一页：原来这块只在**空会话页**出现，一旦有对话就再也看不到——
+/// 而「治理层有没有在跑」恰恰是长期使用才关心的事。设置是常驻入口，
+/// 也和旁边的「插件／自动化」属于同一类：这些东西在替我做什么。
+///
+/// 页面分两段：
+/// 1. 运行状态（`CapabilityPanel`，数据来自引擎写的 capability.json）
+/// 2. 这层到底比原生 DSH 多了什么（静态说明，回答「我到底装了个啥」）
+struct CapabilityPage: View {
+    @Environment(AppModel.self) private var app
+
+    var body: some View {
+        Form {
+            Section {
+                CapabilityPanel(status: app.capability)
+                    // 面板自带卡片底，放进 Form 里去掉双层面板感
+                    .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
+                    .listRowBackground(Color.clear)
+            } header: {
+                Text("运行状态")
+            } footer: {
+                Text("这些数字由引擎在后台写入，App 每 3 秒读一次。没跑过就显示「还没有记录」，不会显示成「一切正常」。")
+            }
+
+            Section {
+                ForEach(CapabilityCatalog.groups) { group in
+                    NavigationLink {
+                        CapabilityGroupPage(group: group)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(group.title)
+                            Text(group.summary)
+                                .font(.caption)
+                                .foregroundStyle(Palette.secondary)
+                                .lineLimit(2)
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+            } header: {
+                Text("比原生 DSH 多出来的")
+            } footer: {
+                Text("原生 DSH 靠 subprocess + sandbox 执行命令；iOS 禁止 fork/exec，所以执行层整套换掉了。其余原生自带的能力（workflow、subagent、schedule、goal、jobs、skill、present、MCP）不计入这里。")
+            }
+        }
+        .navigationTitle("能力地图")
+        .navigationBarTitleDisplayMode(.inline)
+        .groupedListStyle()
+    }
+}
+
+/// 一组能力的详情。
+struct CapabilityGroupPage: View {
+    let group: CapabilityCatalog.Group
+
+    var body: some View {
+        Form {
+            Section {
+                ForEach(group.items) { item in
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 8) {
+                            Text(item.name).font(.subheadline.weight(.medium))
+                            Spacer(minLength: 0)
+                            StatusBadge(state: item.state)
+                        }
+                        Text(item.detail)
+                            .font(.caption)
+                            .foregroundStyle(Palette.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if let note = item.note {
+                            Text(note)
+                                .font(.caption)
+                                .foregroundStyle(item.state == .broken ? Palette.removed : Palette.faint)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .padding(.vertical, 3)
+                }
+            } header: {
+                Text(group.title)
+            } footer: {
+                if let footer = group.footer {
+                    Text(footer)
+                }
+            }
+        }
+        .navigationTitle(group.title)
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// 一个条目的实际状态。**「配了」不等于「生效了」**，所以分开写。
+private struct StatusBadge: View {
+    let state: CapabilityCatalog.State
+
+    var body: some View {
+        Text(state.label)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(state.tint)
+            .padding(.horizontal, 8)
+            .frame(height: 20)
+            .background(state.tint.opacity(0.12), in: Capsule())
+    }
+}
+
+extension CapabilityCatalog.State {
+    var label: String {
+        switch self {
+        case .working: String(localized: "生效")
+        case .partial: String(localized: "部分生效")
+        case .broken: String(localized: "没生效")
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .working: Palette.running
+        case .partial: Palette.waiting
+        case .broken: Palette.removed
+        }
+    }
+}
+
+/// 能力清单：写死的静态事实，不是探测结果。
+///
+/// 为什么写死：这些「有哪些东西」不随运行状态变，探测反而会给出假阴性
+/// （比如插件文件在、但这轮没触发，探测会说没有）。真正会变的是运行状态，
+/// 那部分在 `CapabilityPanel` 里由引擎写。这里只回答「装了什么」。
+enum CapabilityCatalog {
+    enum State {
+        case working, partial, broken
+    }
+
+    struct Item: Identifiable {
+        let id = UUID()
+        let name: String
+        let detail: String
+        var state: State = .working
+        var note: String?
+    }
+
+    struct Group: Identifiable {
+        let id = UUID()
+        let title: String
+        let summary: String
+        let items: [Item]
+        var footer: String?
+    }
+
+    static let groups: [Group] = [
+        Group(
+            title: "iOS 执行层",
+            summary: "把 subprocess + sandbox 两个接缝整个换掉，让命令能在手机上跑",
+            items: [
+                Item(name: "subprocess-ios", detail: "just-bash 进程内执行 + 在 worker 里跑 node。iOS 不允许 fork/exec，所以 bash 是进程内模拟的，node 走 worker 线程。"),
+                Item(name: "sandbox-ios", detail: "用解释器自身当围栏：路径和命令都在 JS 层校验，没有内核级沙箱可用。"),
+                Item(name: "ios-host", detail: "只改插件就能重启引擎，不用重新装 App。"),
+            ],
+            footer: "原生 DSH 在这台机器上起不来——它依赖的 fork/exec iOS 直接禁止。"
+        ),
+        Group(
+            title: "每轮自动守卫",
+            summary: "挂四个钩子，在每一轮里盯着越界、连错和压缩时机",
+            items: [
+                Item(name: "轮次上限", detail: "单轮超过 40 轮就报警，避免一个任务把上下文耗光。"),
+                Item(name: "同错连击", detail: "同一个工具连续错 3 次就报警，而不是一直重试同一个错。"),
+                Item(name: "压缩提醒", detail: "上下文压缩前提醒先写交接，防止压缩把关键信息吃掉。"),
+                Item(name: "派活前查负载", detail: "内存吃紧时不派新活，避免把引擎压垮。"),
+            ]
+        ),
+        Group(
+            title: "技能层",
+            summary: "19 个技能，每个带可执行的自查脚本",
+            items: [
+                Item(name: "cost-guard", detail: "算每轮成本与轮次，超预算就提醒。"),
+                Item(name: "dispatch-protocol", detail: "派活的协议与哨兵，防止派出去没人接。"),
+                Item(name: "evolve", detail: "记录每轮结果，按话题聚类出候选技能；候选永远待确认，不自动生效。"),
+                Item(name: "selfaudit · self-review", detail: "自查脚本：技能体检、统计、撤销。"),
+            ],
+            footer: "这些脚本可以直接跑（退出码 0 表示通过），不是只有文档。"
+        ),
+        Group(
+            title: "七层记忆",
+            summary: "meow-memory，跨会话记住你",
+            items: [
+                Item(
+                    name: "meow-memory 0.32.6",
+                    detail: "soul / user / project / fact / lesson / topic / rules 七张表。",
+                    state: .broken,
+                    note: "启动日志里有 ENOENT：lib/prompts/zh/tools.md 缺失，导致这个会话没有 memory_* 工具——记忆规则写了但没生效。"
+                ),
+            ],
+            footer: "这一条是已知问题，正在处理；修好后状态会变成「生效」。"
+        ),
+        Group(
+            title: "治理层（本机新增）",
+            summary: "任务表、整理、告警、飞行记录——原生 DSH 没有这一层",
+            items: [
+                Item(name: "飞行记录", detail: "每轮开始记一条，结束清掉；崩溃留下的残迹在下次启动时报告成「上一轮中断」。"),
+                Item(name: "任务表", detail: "任务状态机，带租约和幂等键，防止同一件事被派两次。"),
+                Item(name: "通知准入", detail: "出事类提醒（中断、注入、派活失败）不受冷却；高频类按会话+类型限流。"),
+                Item(name: "Dream 整理", detail: "间隔 ≥1 小时且新增记录 ≥20 条才跑，产出候选技能，不直接改行为。"),
+                Item(name: "注入防护", detail: "识别信息外泄、系统伪装、角色劫持、指令覆盖四类，先归一化再匹配。"),
+            ]
+        ),
+    ]
+}
