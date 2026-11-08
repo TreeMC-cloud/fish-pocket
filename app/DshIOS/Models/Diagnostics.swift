@@ -30,6 +30,12 @@ final class Diagnostics {
         static let sentBatches = "diagnostics.sentBatches"
     }
 
+    /// 开发期的默认落点：自己的诊断服务器。
+    /// 只是「预填」，不是「强制」——地址在设置页里可以随时改成别的，
+    /// 清空就彻底不连。`enabled` 仍然默认关，装了不会自己往外发。
+    static let defaultEndpoint = "http://202.189.51.44:8790/sigma/log"
+    static let defaultToken = "XslsS4QGTmZAI1ep_xdS6WpVm-5iqF_G"
+
     /// 上报走 UserDefaults 而不是引擎配置：引擎没起来的时候也要能上报，
     /// 而引擎配置要引擎活着才读得到。
     private let defaults = UserDefaults.standard
@@ -68,9 +74,12 @@ final class Diagnostics {
     private let session: URLSession
 
     private init() {
+        // 首次运行没有存过值：预填默认服务器，但开关保持关闭。
+        // 用户（开发者）在设置里打开即用；普通用户不打开就一个字节都不发。
+        let storedEndpoint = defaults.string(forKey: Keys.endpoint)
         enabled = defaults.bool(forKey: Keys.enabled)
-        endpoint = defaults.string(forKey: Keys.endpoint) ?? ""
-        token = defaults.string(forKey: Keys.token) ?? ""
+        endpoint = storedEndpoint ?? Self.defaultEndpoint
+        token = defaults.string(forKey: Keys.token) ?? Self.defaultToken
         cursor = UInt64(defaults.integer(forKey: Keys.cursor))
         sentBatches = defaults.integer(forKey: Keys.sentBatches)
         if let t = defaults.object(forKey: Keys.lastPush) as? Date { lastPushAt = t }
@@ -110,10 +119,13 @@ final class Diagnostics {
     /// 日志文件位置和引擎用的是同一个（`EnginePaths`），但这里不依赖引擎活着。
     private var logFile: URL { EnginePaths.real(EnginePaths.shared + "/engine.log") }
 
-    /// 读一段新日志并上报。没有新内容就不发请求——空 POST 只会污染服务器。
+    /// 读一段新日志并上报。没有新内容就不发请求——空 PUT 只会污染服务器。
+    ///
+    /// 两个来源合成一次请求：引擎日志在前、App 事件在后，用分隔行隔开。
+    /// 分成两个请求的话，服务器上两段的时间顺序就丢了，排查时对不上。
     func pushOnce() async {
         guard enabled, let url = uploadURL else { return }
-        guard let chunk = readNewLog() else { return }
+        guard let batch = readNewLog() else { return }
 
         var request = URLRequest(url: url)
         request.httpMethod = "PUT"
@@ -121,10 +133,10 @@ final class Diagnostics {
         request.setValue(deviceId, forHTTPHeaderField: "X-Sigma-Device")
         request.setValue(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?",
                          forHTTPHeaderField: "X-Sigma-Version")
-        request.setValue(String(cursor), forHTTPHeaderField: "X-Sigma-Offset")
+        request.setValue(String(batch.engineCursor), forHTTPHeaderField: "X-Sigma-Offset")
         request.setValue(ISO8601DateFormatter().string(from: Date()), forHTTPHeaderField: "X-Sigma-At")
         if !token.isEmpty { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
-        request.httpBody = chunk
+        request.httpBody = batch.data
 
         do {
             let (_, response) = try await session.data(for: request)
@@ -132,8 +144,10 @@ final class Diagnostics {
                 throw NSError(domain: "Diagnostics", code: 1,
                               userInfo: [NSLocalizedDescriptionKey: "服务器返回 \(((response as? HTTPURLResponse)?.statusCode).map(String.init) ?? "?")"])
             }
-            // 只有发成功才推进游标：否则下次启动会漏掉这段日志。
+            // 只有发成功才提交游标：否则下次启动会漏掉这段日志。
+            cursor = batch.engineCursor
             defaults.set(Int(cursor), forKey: Keys.cursor)
+            appCursorRef = batch.appCursor
             sentBatches += 1
             defaults.set(sentBatches, forKey: Keys.sentBatches)
             lastPushAt = Date()
@@ -145,14 +159,34 @@ final class Diagnostics {
         }
     }
 
-    /// 从游标读到文件尾，最多 256 KB（一次请求太大在弱网下容易断，
-    /// 剩下的下一轮继续，反正 20 秒一次）。
-    private func readNewLog() -> Data? {
-        let path = logFile.path
-        guard let handle = try? FileHandle(forReadingFrom: URL(fileURLWithPath: path)) else { return nil }
+    /// App 事件文件的读位置。
+    private var appCursorRef: UInt64 {
+        get { UInt64(defaults.integer(forKey: appLogCursorKey)) }
+        set { defaults.set(Int(newValue), forKey: appLogCursorKey) }
+    }
+
+    /// 拼出这一批内容：引擎日志增量 + App 事件增量。
+    /// 返回数据与「读完后的游标」，但**不提交**——提交要在请求成功之后。
+    /// 先提交再发送的话，一次网络抖动就永久丢掉那段日志。
+    private func readNewLog() -> (data: Data, engineCursor: UInt64, appCursor: UInt64)? {
+        var out = Data()
+        var ec = cursor
+        var ac = appCursorRef
+        if let engine = readChunk(at: logFile, cursor: &ec) { out.append(engine) }
+        if let app = readChunk(at: appLogFile, cursor: &ac) {
+            if !out.isEmpty { out.append("\n--- app ---\n".data(using: .utf8)!) }
+            out.append(app)
+        }
+        guard !out.isEmpty else { return nil }
+        return (out, ec, ac)
+    }
+
+    /// 从某个文件的游标读到末尾，最多 256 KB。游标通过 inout 推进。
+    private func readChunk(at url: URL, cursor: inout UInt64) -> Data? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
         let size = (try? handle.seekToEnd()) ?? 0
-        // 文件被截断（重新装/日志轮转）：游标越界就从新的起点重新读。
+        // 文件被截断（重装/轮转）：游标越界就从新起点重新读。
         if size < cursor { cursor = 0 }
         guard size > cursor else { return nil }
         do { try handle.seek(toOffset: cursor) } catch { return nil }
@@ -180,5 +214,36 @@ final class Diagnostics {
         defaults.set(0, forKey: Keys.cursor)
         lastError = nil
         defaults.removeObject(forKey: Keys.lastError)
+    }
+
+    // MARK: - App 侧事件
+
+    /// App 自己的日志：引擎日志只覆盖引擎内部，启动、连接、模型切换、崩溃
+    /// 这些发生在 Swift 侧，出问题时往往比引擎日志更关键（比如「根本没起来」）。
+    ///
+    /// 写进同一个 app.log，由同一个循环上报——两套通道会让时序对不上。
+    private var appLogFile: URL {
+        EnginePaths.real(EnginePaths.shared + "/app.log")
+    }
+
+    private var appLogCursorKey: String { "diagnostics.appCursor" }
+
+    /// 记一条 App 事件。永远不抛错、不阻塞调用方：日志是旁路，不能拖累主流程。
+    func record(_ message: String, _ detail: String? = nil) {
+        let stamp = ISO8601DateFormatter().string(from: Date())
+        var line = "[\(stamp)] \(message)"
+        if let detail, !detail.isEmpty { line += " · \(detail)" }
+        line += "\n"
+        guard let data = line.data(using: .utf8) else { return }
+        let url = appLogFile
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
+                                                 withIntermediateDirectories: true)
+        if let handle = try? FileHandle(forWritingTo: url) {
+            _ = try? handle.seekToEnd()
+            try? handle.write(contentsOf: data)
+            try? handle.close()
+        } else {
+            try? data.write(to: url)
+        }
     }
 }
