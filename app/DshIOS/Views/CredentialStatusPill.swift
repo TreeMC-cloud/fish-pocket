@@ -101,10 +101,13 @@ struct CredentialStatusPill: View {
 extension AppModel {
     /// 当前默认模型的名字，给药丸显示。读不到就不显示（返回 nil）。
     func defaultModelLabel() async -> String? {
-        guard let catalog = try? await client.call("session/modelCatalog"),
-              let groups = catalog["groups"].array else { return nil }
+        guard let catalog = try? await client.call("session/modelCatalog") else { return nil }
+        // JSON.array 是 [JSON]（不是 Optional），空数组就是「没有」。
+        // 写 guard let 会被编译器拒（initializer for conditional binding must have Optional type）。
+        let groups = catalog["groups"].array
         for group in groups {
-            guard let models = group["models"].array else { continue }
+            let models = group["models"].array
+            if models.isEmpty { continue }
             if let selected = models.first(where: { $0["selected"].bool == true }) ?? models.first {
                 if let label = selected["label"].string ?? selected["name"].string ?? selected["id"].string {
                     return label
