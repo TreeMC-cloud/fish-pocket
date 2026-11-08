@@ -179,6 +179,9 @@ struct GroupedListStyle: ViewModifier {
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
             .background(Palette.background)
+            // 分组之间要拉开距离：一叠玻璃卡挨太近会糊成一片，
+            // 看不出「这是三个不同的分区」。14pt 让每叠卡自成一块。
+            .listSectionSpacing(14)
     }
 }
 
@@ -216,6 +219,11 @@ extension View {
     /// 用 `.fill(.regularMaterial)` 而不是 `.glassEffect`：
     /// List 的行背景必须是「填满矩形」的视图，`glassEffect` 会把内容再包一层形状，
     /// 和 List 的行裁剪打架（圆角会错位）。材质 + 内高光描边在这里等价且稳。
+    ///
+    /// 行内边距必须显式给：`.insetGrouped` 的默认上下边距只有 11pt，而这里的
+    /// 卡片圆角是 22pt——内容正好压在圆弧起势的位置上，一叠卡看着又挤又紧。
+    /// 给到 14pt 的上下留白后，文字离卡边有一段呼吸，圆角也不再切到字。
+    /// 左右也用 16pt，和 iOS 设置页的分组内容对齐。
     func groupedRow() -> some View {
         listRowBackground(
             RoundedRectangle(cornerRadius: 22, style: Glass.corner)
@@ -233,6 +241,7 @@ extension View {
                 }
         )
         .listRowSeparator(.hidden)
+        .listRowInsets(EdgeInsets(top: 14, leading: 16, bottom: 14, trailing: 16))
     }
 
     /// A close button for a view presented as a sheet (it may also be pushed, where it has none).
