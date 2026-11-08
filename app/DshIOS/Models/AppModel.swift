@@ -134,6 +134,9 @@ final class AppModel {
     var openRequest: (id: String, token: UUID)?
     /// A credential step to open (set through `requestCredentials`; the root view consumes it).
     var credentialRequest: (step: CredentialStep, token: UUID)?
+    /// 引擎叫我们弹的预览（`dsh-ios/preview` → notices.jsonl 的 kind=preview）。
+    /// 根视图消费它并清空，和 `credentialRequest` 同一套一次性请求模式。
+    var previewRequest: (url: URL, title: String, token: UUID)?
     /// 快捷胶囊选了某个场景模板（对应 engine/skills/scene/panel.mjs 的键）。
     /// 发送时拼进消息前缀，AI 就按那个场景组织面板，不用用户自己说。
     var pendingSceneHint: String?
@@ -232,8 +235,25 @@ final class AppModel {
                 guard lines.count > self.noticeLine else { continue }
                 for line in lines[self.noticeLine...] {
                     guard let data = line.data(using: .utf8),
-                          let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                          let message = obj["message"] as? String else { continue }
+                          let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
+                    // kind=preview：引擎做好了网页/图片，直接弹给用户看。
+                    // 和普通提醒的区别是它不是一行字，而是一个要打开的文件。
+                    if obj["kind"] as? String == "preview" {
+                        guard let raw = obj["path"] as? String else { continue }
+                        let url = URL(fileURLWithPath: raw)
+                        guard FileManager.default.fileExists(atPath: raw) else {
+                            self.showToast("要预览的文件不见了：\(url.lastPathComponent)", duration: 6)
+                            continue
+                        }
+                        self.previewRequest = (
+                            url: url,
+                            title: (obj["title"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                                ?? url.lastPathComponent,
+                            token: UUID()
+                        )
+                        continue
+                    }
+                    guard let message = obj["message"] as? String else { continue }
                     self.showToast(message, duration: 8)
                 }
                 self.noticeLine = lines.count
