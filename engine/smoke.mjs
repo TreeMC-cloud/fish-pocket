@@ -57,12 +57,13 @@ for (const spec of ['openai', '@anthropic-ai/sdk', '@google/genai']) {
 //    不能 import('pnpm')：它不是 ESM 模块，会解析到 package.json 并抛
 //    ERR_IMPORT_ATTRIBUTE_MISSING；它的 exports 也不开放 ./bin/pnpm.cjs。
 try {
-  const { createRequire } = await import('node:module');
   const { existsSync } = await import('node:fs');
-  const { dirname, join } = await import('node:path');
-  const require = createRequire(join(process.cwd(), 'noop.cjs'));
-  const root = dirname(require.resolve('pnpm/package.json'));
-  if (!['bin/pnpm.cjs', 'bin/pnpm.mjs'].some((rel) => existsSync(join(root, rel)))) {
+  // 直接按物理路径找，不走 require.resolve：
+  // pnpm 的 exports 不开放 './package.json'（会报 Package subpath not defined），
+  // 也不开放 './bin/pnpm.cjs'。冒烟只关心「这个目录和入口文件在不在」。
+  const root = 'node_modules/pnpm';
+  if (!existsSync(root)) throw new Error('node_modules/pnpm 不存在（被剪掉了？）');
+  if (!['bin/pnpm.cjs', 'bin/pnpm.mjs'].some((rel) => existsSync(`${root}/${rel}`))) {
     throw new Error('包里没有 bin/pnpm.cjs 或 .mjs');
   }
 } catch (error) {
