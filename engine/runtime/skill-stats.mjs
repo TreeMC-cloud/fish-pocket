@@ -54,9 +54,13 @@ function save(state, dataDir) {
 export function record(name, ok, { dataDir, now = Date.now() } = {}) {
   if (typeof name !== 'string' || !name.trim()) return null;
   const state = load(dataDir);
-  const entry = state.skills[name] ?? { uses: 0, failures: 0, firstUsedAt: now, lastUsedAt: now };
+  const entry = state.skills[name] ?? { uses: 0, failures: 0, unknown: 0, firstUsedAt: now, lastUsedAt: now };
   entry.uses += 1;
+  // 三态：true 成功 / false 失败 / null 未知。
+  // 「未知」不能算成功——技能加载成功不代表它解决了问题，
+  // 混进成功会让失败率被稀释，降级判定永远触发不了。
   if (ok === false) entry.failures += 1;
+  else if (ok == null) entry.unknown = (entry.unknown ?? 0) + 1;
   entry.lastUsedAt = now;
   state.skills[name] = entry;
   trim(state);
@@ -83,21 +87,26 @@ export function report({ dataDir, minUses = 5, failRatio = 0.4 } = {}) {
   for (const [name, s] of Object.entries(state.skills)) {
     const uses = s.uses || 0;
     const failures = s.failures || 0;
+    const unknown = s.unknown || 0;
+    const known = uses - unknown;      // 有明确结果的次数
     let verdict = 'ok';
     let reason = '';
-    if (uses < minUses) {
+
+    if (known < minUses) {
+      // 关键：用「已知结果」的次数判断，不是总次数。
+      // 加载了 10 次但 9 次结果未知，说明的是"没法判断"，不是"用得很好"。
       verdict = 'insufficient-data';
-      reason = `只有 ${uses} 次使用（需 ≥${minUses}）`;
+      reason = `有明确结果的只有 ${known} 次（共加载 ${uses} 次，需 ≥${minUses}）`;
     } else {
-      const ratio = failures / uses;
+      const ratio = failures / known;
       if (ratio >= failRatio) {
         verdict = 'degrade';
-        reason = `失败率 ${(ratio * 100).toFixed(0)}%（${failures}/${uses}）≥ ${failRatio * 100}%`;
+        reason = `失败率 ${(ratio * 100).toFixed(0)}%（${failures}/${known}）≥ ${failRatio * 100}%`;
       } else {
-        reason = `失败率 ${(ratio * 100).toFixed(0)}%（${failures}/${uses}）`;
+        reason = `失败率 ${(ratio * 100).toFixed(0)}%（${failures}/${known}）`;
       }
     }
-    rows.push({ name, uses, failures, verdict, reason, lastUsedAt: s.lastUsedAt });
+    rows.push({ name, uses, failures, unknown, known, verdict, reason, lastUsedAt: s.lastUsedAt });
   }
   rows.sort((a, b) => (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0));
   return {
