@@ -35,3 +35,14 @@ test('标签与退出码一一对应', () => {
   assert.equal(verdict({ cpu: 91, mem: 1 }).label, '⚠ 停止派单');
   assert.equal(verdict({ cpu: 99, mem: 1 }).label, '⛔ 停重活');
 });
+
+test('内存读的是真实可用量，不是内核 MemFree', async () => {
+  const { sample } = await import('../skills/cost-guard/load-gate.mjs');
+  const s = await sample();
+  assert.ok(s, '应该能采样到数据');
+  assert.equal(s.source, 'os.freemem', 'iSH 的 meminfo 没有 MemAvailable，必须退回 os.freemem');
+  // 回归：MemFree 只有 ~64MB，若拿它当可用，会算出 97% 这种假警报。
+  // 真实可用（os.freemem）应该在总内存的 30% 以上——留足余量，不写死具体值。
+  assert.ok(s.freeMB > s.totalMB * 0.3,
+    `可用内存 ${s.freeMB}MB / ${s.totalMB}MB 偏低，怀疑又退回了 MemFree`);
+});
