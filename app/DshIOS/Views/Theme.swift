@@ -232,6 +232,9 @@ extension View {
     /// 左右也用 16pt，和 iOS 设置页的分组内容对齐。
     func groupedRow() -> some View {
         listRowBackground(
+            // 卡片本身不再铺满整行高度：上下各留 5pt，行与行之间才有缝。
+            // 之前圆角 22 的卡片直接首尾相接，视觉上成了一整块被横线切开的色块，
+            // 这正是「每一行和下一行好挤」的来源——不是内边距不够，是卡片之间没有间隔。
             RoundedRectangle(cornerRadius: 22, style: Glass.corner)
                 .fill(.regularMaterial)
                 .overlay {
@@ -245,9 +248,11 @@ extension View {
                             lineWidth: 0.5
                         )
                 }
+                .padding(.vertical, 5)
         )
         .listRowSeparator(.hidden)
-        .listRowInsets(EdgeInsets(top: 14, leading: 16, bottom: 14, trailing: 16))
+        // 内容内边距保持 14：卡片自己有了 5pt 外缩，内容再压 14 就有双层留白。
+        .listRowInsets(EdgeInsets(top: 9, leading: 16, bottom: 9, trailing: 16))
     }
 
     /// A close button for a view presented as a sheet (it may also be pushed, where it has none).
