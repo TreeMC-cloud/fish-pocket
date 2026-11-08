@@ -1,6 +1,10 @@
 ---
 name: rotate
 description: 会话太长该换了。轮次多、上下文变长、响应变慢时，先写交接再换会话。
+version: 1.0.0
+source: handwritten
+permissions: [writes-files]
+
 ---
 
 # 换会话
