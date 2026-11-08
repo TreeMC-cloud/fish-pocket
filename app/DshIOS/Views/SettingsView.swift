@@ -131,6 +131,7 @@ struct SettingsView: View {
 
                 Section {
                     NavigationLink("高级") { AdvancedSettingsPage() }
+                    NavigationLink("诊断上报") { DiagnosticsPage() }
                     NavigationLink { AboutPage(engineVersion: engineVersion) } label: { valueRow("关于", aboutValue) }
                 }
                 .groupedRow()
