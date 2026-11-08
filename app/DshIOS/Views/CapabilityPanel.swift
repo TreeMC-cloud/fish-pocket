@@ -96,6 +96,9 @@ struct CapabilityStatus: Decodable, Equatable {
 /// 3. **只显示有意义的**：一堆 0 的格子不如不显示。
 struct CapabilityPanel: View {
     let status: CapabilityStatus?
+    /// 放进已有卡片的容器（设置页的 Form 行）时不画自己的底和描边，
+    /// 否则玻璃行里再套一层实心卡，边看不出来但底色会压暗一层。
+    var bare = false
 
     private var s: CapabilityStatus { status ?? .unknown }
 
@@ -118,10 +121,18 @@ struct CapabilityPanel: View {
                 emptyState
             }
         }
-        .padding(16)
+        .padding(bare ? 0 : 16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Palette.field, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Palette.stroke))
+        .background {
+            if !bare {
+                RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Palette.field)
+            }
+        }
+        .overlay {
+            if !bare {
+                RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Palette.stroke)
+            }
+        }
     }
 
     // MARK: - 头部
