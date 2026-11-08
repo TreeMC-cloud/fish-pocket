@@ -17,7 +17,7 @@ struct SupportDialog: View {
             Palette.scrim.ignoresSafeArea()
             VStack(spacing: 0) {
                 icon
-                Text("喜欢 Fish Pocket 吗？")
+                Text("喜欢 Sigma 吗？")
                     .font(.headline)
                     .foregroundStyle(Palette.ink)
                     .padding(.top, 16)
