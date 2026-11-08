@@ -1,6 +1,10 @@
 ---
 name: preferences
 description: 用户的称呼、风格、禁忌和固定做法。做事前先对齐，不确定某些偏好时读。
+version: 1.0.0
+source: handwritten
+permissions: [writes-files]
+
 ---
 
 # 偏好 —— 不只记事实，还记「你喜欢怎样」
