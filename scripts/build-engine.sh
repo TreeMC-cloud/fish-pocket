@@ -20,6 +20,9 @@ if [ -f "$root/.engine-cache/nodejs-project.tar" ]; then
   exit 0
 fi
 cp "$src/package.json" "$src/main.mjs" "$src/boot.mjs" "$src/ios.patch.yml" "$out/"
+# smoke.mjs 放在树根：它天然按树内 node_modules 解析依赖，
+# 不用操心 import 的解析基准（放 scripts/ 里会全部找不到包）。
+[ -f "$src/smoke.mjs" ] && cp "$src/smoke.mjs" "$out/"
 # 全局铁律：main.mjs 在启动时把它复制到 $DSH_HOME/AGENTS.md，每轮注入。
 # 漏了这个文件，规则就只是文档里的一句话，不会真的进模型。
 [ -f "$src/AGENTS.md" ] && cp "$src/AGENTS.md" "$out/"
@@ -141,40 +144,17 @@ echo "engine: $out ($((before/1024)) MB -> $((after/1024)) MB)"
 rm -rf "$nm"/typescript
 # 剪枝后冒烟必须放在这里：验证的是“最终形态”（物化目录 + 无链接 + 已裁剪），
 # CI 验证过的树 ≠ 打进 .app 的树，真机跑的是后者。
-# dsh-web 是必须测的：它从 dsh-llm import HarnessError，最小 shim 时代就是它先炸。
-(cd "$out" && node --input-type=module -e "
-  const llm = await import('@deepseek-ai/dsh-llm');
-  if (typeof llm.HarnessError !== 'function') throw new Error('dsh-llm shim missing HarnessError');
-  await import('@deepseek-ai/dsh-app-boot');
-  await import('@deepseek-ai/dsh-web');
-  await import('@deepseek-ai/dsh-tools');   // peer: dsh-scope 等
-  await import('@deepseek-ai/dsh-session-persistence');
-  await import('@deepseek-ai/dsh-spill-local');
-  await import('meow-memory');
-  // 下面三个是真机日志里 23 处报错的包：它们的 main 就在 src/ 下，
-  // 曾被我们的 src 剪枝规则误删。冒烟必须覆盖，否则同样的事还会再发生。
-  await import('debug');
-  await import('human-signals');
-  await import('@opentelemetry/api-logs');
-  // pnpm 是 App 内装插件的唯一通道（dsh plugin add → pnpm add）。
-  // 它被剪掉的后果是真机装插件报 MODULE_NOT_FOUND，而不是构建失败，
-  // 所以必须在这里挡住。
-  //
-  // 注意不能写 `await import('pnpm')`：pnpm 不是 ESM 模块，它解析到
-  // package.json，Node 会要求 JSON import attribute 直接抛
-  // ERR_IMPORT_ATTRIBUTE_MISSING。用 createRequire 按运行时的方式解它。
-  const { createRequire } = await import('node:module');
-  const require = createRequire(process.cwd() + '/');
-  require.resolve('pnpm');           // pnpm 的入口能解析出来
-  const bin = require.resolve('pnpm/bin/pnpm.cjs');
-  if (!bin) throw new Error('pnpm bin missing');
-  // pi-ai 是 LLM 供应商库（dsh-llm-deepseek 的底座），静态 import openai ——
-  // 第六轮真机日志就是它炸的（Cannot find package 'openai'）。
-  const pi = await import('@earendil-works/pi-ai');
-  // pi-ai 78 个导出里真正关键的供应商入口（实测形状，别用猜的符号名）
-  if (typeof pi.createProvider !== 'function') throw new Error('pi-ai shape unexpected: no createProvider()');
-" > /tmp/engine-smoke.log 2>&1) || { echo "engine: smoke import failed:" >&2; grep -v 'Warning' /tmp/engine-smoke.log >&2 || cat /tmp/engine-smoke.log >&2; exit 1; }
-echo "engine: post-prune smoke OK"
+# JS 写在 scripts/engine-smoke.mjs 而不是 `node -e "..."`：
+# 双引号里带括号和引号的 JS 会被 bash 当命令替换解析（踩过两次）。
+# smoke.mjs 随 engine 一起被拷进 $out（见上面 rsync/cp），所以它就在树根，
+# 天然按树内 node_modules 解析依赖——不用操心 import 的解析基准。
+if ! (cd "$out" && node smoke.mjs > /tmp/engine-smoke.log 2>&1); then
+  echo "engine: smoke import failed:" >&2
+  cat /tmp/engine-smoke.log >&2
+  exit 1
+fi
+cat /tmp/engine-smoke.log
+
 after2=$(du -sk "$nm" | cut -f1)
 echo "engine: final $((after2/1024)) MB (pruned $(( (after-after2)/1024 )) MB)"
 
