@@ -53,7 +53,7 @@ targets:
     info:
       path: DshIOS/Info.plist
       properties:
-        CFBundleDisplayName: Fish Pocket
+        CFBundleDisplayName: Sigma
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleDevelopmentRegion: zh-Hans
@@ -129,7 +129,7 @@ targets:
     info:
       path: LiveActivity/Info.plist
       properties:
-        CFBundleDisplayName: Fish Pocket
+        CFBundleDisplayName: Sigma
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:
