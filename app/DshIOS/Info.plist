@@ -68,10 +68,6 @@
 	<dict>
 		<key>UIColorName</key>
 		<string>Background</string>
-		<key>UIImageName</key>
-		<string>LaunchMark</string>
-		<key>UIImageRespectsSafeAreaInsets</key>
-		<false/>
 	</dict>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
