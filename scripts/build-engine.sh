@@ -159,7 +159,15 @@ rm -rf "$nm"/typescript
   // pnpm 是 App 内装插件的唯一通道（dsh plugin add → pnpm add）。
   // 它被剪掉的后果是真机装插件报 MODULE_NOT_FOUND，而不是构建失败，
   // 所以必须在这里挡住。
-  await import('pnpm');
+  //
+  // 注意不能写 `await import('pnpm')`：pnpm 不是 ESM 模块，它解析到
+  // package.json，Node 会要求 JSON import attribute 直接抛
+  // ERR_IMPORT_ATTRIBUTE_MISSING。用 createRequire 按运行时的方式解它。
+  const { createRequire } = await import('node:module');
+  const require = createRequire(process.cwd() + '/');
+  require.resolve('pnpm');           // pnpm 的入口能解析出来
+  const bin = require.resolve('pnpm/bin/pnpm.cjs');
+  if (!bin) throw new Error('pnpm bin missing');
   // pi-ai 是 LLM 供应商库（dsh-llm-deepseek 的底座），静态 import openai ——
   // 第六轮真机日志就是它炸的（Cannot find package 'openai'）。
   const pi = await import('@earendil-works/pi-ai');
