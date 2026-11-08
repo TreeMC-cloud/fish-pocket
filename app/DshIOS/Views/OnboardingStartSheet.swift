@@ -96,7 +96,8 @@ struct OnboardingStartSheet: View {
             }
 
             Spacer(minLength: 8)
-
+            // Spacer 在 ScrollView 里不生效，所以底部两行链接放在滚动区外，
+            // 保证小屏上也能看到「登录 / 先逛逛」。
             HStack(spacing: 14) {
                 Button("登录 DeepSeek 账号", action: signIn)
                     .font(.footnote)
@@ -109,7 +110,9 @@ struct OnboardingStartSheet: View {
             .buttonStyle(.plain)
             .padding(.bottom, 26)
         }
-        .presentationDetents([.height(explaining ? 590 : 500)])
+        // 高度按屏幕自适应：写死 590 在 iPhone SE（667pt）上会顶到状态栏。
+        // 用 .fraction 让 sheet 最多占 78% 屏高，内容再长就靠 ScrollView。
+        .presentationDetents(explaining ? [.fraction(0.86)] : [.fraction(0.68), .fraction(0.86)])
         .presentationDragIndicator(.hidden)
         // 半透明底：让下面的会话隐约透出来，玻璃 sheet 才“浮”得住。
         // 不用 .presentationBackground(.clear)：它会让 sheet 完全透明，
