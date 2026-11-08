@@ -6,6 +6,7 @@ import path from 'node:path';
 import {
   readInFlight, writeInFlight, interruptedSince, reportInterrupted, STALE_MS,
 } from '../runtime/flight-recorder.mjs';
+import { load as loadRegistry, pendingOutbox } from '../runtime/task-registry.mjs';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'flight-'));
 
@@ -52,11 +53,29 @@ test('报告一次后清空，第二次启动不再提示', () => {
   assert.equal(lines.length, 1);
 });
 
-test('写完通知失败也要清空记录，避免每次启动重复提示', () => {
+test('写完通知失败时必须保留记录，不能丢掉唯一证据', () => {
   const dir = tmp();
   writeInFlight(dir, { s1: Date.now() - 1000 });
   reportInterrupted(dir, { write: () => { throw new Error('disk full'); } });
-  assert.deepEqual(readInFlight(dir), []);
+
+  // 旧实现这里会清空——注释写「否则每次启动都提示」，代价是中断证据永久消失。
+  // 现在的语义：写不进去就留着，下次启动再试。重复提醒远好于静默丢失。
+  const left = readInFlight(dir);
+  assert.equal(left.length, 1, '写失败后 in-flight 必须保留');
+  assert.equal(left[0].session, 's1');
+});
+
+test('写成功后清空，且转成 outbox 待投递事件', () => {
+  const dir = tmp();
+  writeInFlight(dir, { s1: { at: Date.now() - 1000, step: '正在运行命令（npm test）' } });
+  reportInterrupted(dir);
+
+  assert.deepEqual(readInFlight(dir), [], '写成功后应清空 in-flight');
+  const state = loadRegistry(dir);
+  const pending = pendingOutbox(state);
+  assert.equal(pending.length, 1, '中断事件应进 outbox 等投递');
+  assert.equal(pending[0].kind, 'interrupted');
+  assert.equal(pending[0].detail.steps.s1, '正在运行命令（npm test）');
 });
 
 test('单个任务时文案是单数', () => {
