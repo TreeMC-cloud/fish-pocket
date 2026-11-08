@@ -340,13 +340,23 @@ struct ConversationView: View {
             }
             .sheetNotices()
         }
-        .alert("出错了", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
+        // 把 Binding 抽成独立属性：内联的 get/set 闭包 + 三个修饰符串在一起，
+        // Swift 的类型推断会超时（真机 CI 报过 "unable to type-check in reasonable time"）。
+        .alert("出错了", isPresented: errorPresented) {
             Button("好", role: .cancel) {}
         } message: {
             Text(model.error ?? "")
         }
         .environment(\.fileLinkScope, FileLinkScope(sessionId: sessionId, root: model.workingDirectory))
         .environment(\.sessionModel, model)
+    }
+
+    /// 「出错了」弹窗的开关。单独拎出来是因为内联闭包会让类型推断超时。
+    private var errorPresented: Binding<Bool> {
+        Binding(
+            get: { model.error != nil },
+            set: { shown in if !shown { model.error = nil } }
+        )
     }
 
     // MARK: Workbench
