@@ -36,9 +36,32 @@ final class SessionModel {
         return result
     }
     private(set) var queued: [(id: String, text: String)] = []
-    /// 这个会话上次被引擎重启打断，还没被用户看过/关掉过。
-    /// 由 AppModel 在收到 kind=interrupted 时置位；用户在会话里关掉横幅后清除。
-    var interruptedNotice: String?
+    /// 用户关闭横幅不应让 timeline 又显示成「运行中」。状态覆盖持续到新 turn 开始。
+    private(set) var interruptedNotice: String?
+    private var interruptedTurn: Int?
+
+    /// 只在新 turn 开始时清掉旧的中断覆盖；其他 session 事件或重折叠不能抹掉它。
+    func configureInterruptedState(message: String, turn: Int?) {
+        interruptedNotice = message
+        interruptedTurn = turn
+        applyInterruptedState()
+    }
+
+    func dismissInterruptedNotice() {
+        interruptedNotice = nil
+    }
+
+    private func clearInterruptedState() {
+        interruptedNotice = nil
+        interruptedTurn = nil
+    }
+
+    /// `turn/start` event 已追加、TimelineBuilder 已应用后，关闭指定 turn 的本地运行态。
+    private func applyInterruptedState() {
+        guard let turn = interruptedTurn else { return }
+        _ = timeline.markInterrupted(turn: turn)
+        publishTimeline()
+    }
 
     private(set) var modelSelection: (provider: String, model: String, effort: String?)?
     private(set) var permission: String?
@@ -132,6 +155,7 @@ final class SessionModel {
             hasMoreHistory = frame["hasMore"].bool ?? false
             // A long turn's start can lie before the window: the session list still knows it runs.
             refold(running: app.sessions[sessionId]?.running ?? false)
+            applyInterruptedState()
             cursor = frame["cursor"].int ?? -1
             applyProjections(frame["projections"]["values"])
             resetLive()
@@ -143,6 +167,8 @@ final class SessionModel {
             guard let seq = event["seq"].int, seq > cursor else { return }
             cursor = seq
             composer.observe(event)
+            // 一个新的真实 turn 开始了：旧中断状态已经过期，正常显示这次执行。
+            if event["type"].string == "turn/start" { clearInterruptedState() }
             events.append(event)
             if timeline.apply(event) { publishTimeline() } else { publishTimelineState() }
             // Only a live turn end prompts for quota or support; history replays never do.
