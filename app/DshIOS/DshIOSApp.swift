@@ -70,7 +70,10 @@ struct RootView: View {
             if engine.stalled {
                 EngineTrouble(headline: String(localized: "引擎还没起来"), since: engine.startedAt, logFile: engine.logFile)
             } else {
-                StartupView(message: String(localized: "正在启动 DSH 引擎…"))
+                // 用户看到的是「Sigma 在加载」，不是「DSH 引擎在启动」。
+                // DSH 是运行环境，不是这个 App 的名字——启动画面是最先建立认知的地方，
+                // 写「DSH 引擎」会让人以为装的是个开发工具。
+                StartupView(message: String(localized: "正在加载 Sigma…"))
             }
         case .running(let url, let current):
             Group {
@@ -93,20 +96,26 @@ private struct StartupView: View {
     let message: String
 
     var body: some View {
-        Image("LaunchMark")
-            .accessibilityHidden(true)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .overlay {
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
-                    Text(message)
-                }
-                .font(.subheadline)
-                .foregroundStyle(Palette.secondary)
-                .offset(y: 72)
+        VStack(spacing: 18) {
+            // 启动画的心智锚点：先看到 Σ，再看到名字，最后才是状态。
+            // 原来是纯图形（LaunchMark 里画的是旧 Z 形标），没有任何名字，
+            // 用户看不出这是哪个 App。现在把符号和名字一起给出来。
+            Image("LaunchMark")
+                .accessibilityHidden(true)
+            Text("Sigma")
+                .font(.system(size: 24, weight: .semibold))
+                .foregroundStyle(Palette.ink)
+                .accessibilityAddTraits(.isHeader)
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text(message)
             }
-            .background(Palette.background)
-            .ignoresSafeArea()
+            .font(.subheadline)
+            .foregroundStyle(Palette.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Palette.background)
+        .ignoresSafeArea()
     }
 }
 
