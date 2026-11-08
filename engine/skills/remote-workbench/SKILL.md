@@ -1,6 +1,10 @@
 ---
 name: remote-workbench
 description: 远程工作台（服务器上的项目）。要在远端跑命令、改文件、查状态时用。
+version: 1.0.0
+source: handwritten
+permissions: [runs-commands,network]
+
 ---
 
 # 远程工作台
