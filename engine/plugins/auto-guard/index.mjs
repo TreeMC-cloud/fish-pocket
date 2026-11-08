@@ -22,6 +22,12 @@ import { execFileSync } from 'node:child_process';
 import { parentPort } from 'node:worker_threads';
 import { scanInjection } from '../../runtime/injection-guard.mjs';
 import { writeInFlight, describeStep } from '../../runtime/flight-recorder.mjs';
+import {
+  load as loadTasks,
+  save as saveTasks,
+  pendingOutbox,
+  ack as ackTaskEvent,
+} from '../../runtime/task-registry.mjs';
 
 const DEFAULT_TURNS_MAX = 40;
 const DEFAULT_REPEAT_MAX = 3;
@@ -257,6 +263,31 @@ export default class AutoGuard {
     // 但全仓没有一处调用它——和轮次计数、记忆注入是同一个病：能力在，触发无。
     // 靠人记得跑，漏掉的恰好是「最该催」的那几条。
     this.checkDispatches(session);
+
+    // 任务表：把 outbox 里还没投递的通知发出去。
+    // 任务状态本身由 Router/调用方通过 task-registry 写，这里只负责「不丢消息」。
+    this.flushTaskOutbox(session);
+  }
+
+  /**
+   * 把 task registry 的 outbox 投递到提醒通道，并 ack。
+   *
+   * 为什么放在每轮：没有常驻定时器的 iOS 环境里，轮次是唯一可靠的节拍。
+   * 代价是 outbox 里的消息最多晚一轮才送达——比丢了好。
+   */
+  flushTaskOutbox(session) {
+    try {
+      const state = loadTasks(this.dataDir());
+      const pending = pendingOutbox(state);
+      if (!pending.length) return;
+      for (const event of pending.slice(0, 5)) {   // 一次最多 5 条，避免刷屏
+        this.notify(event.message, { ...(event.detail ?? {}), kind: event.kind, taskId: event.taskId, session: sessionId(session) });
+        ackTaskEvent(state, event.eventId);
+      }
+      saveTasks(state, this.dataDir());
+    } catch (error) {
+      try { this.ctx.logger?.warn?.('[auto-guard] task outbox 投递失败: %s', error?.message ?? error); } catch { /* 无 logger */ }
+    }
   }
 
   /**
