@@ -1,0 +1,37 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { verdict } from '../skills/cost-guard/load-gate.mjs';
+
+/**
+ * 负载闸的判据必须能被稳定测试，否则「90% 不许派单」只是文档里一句话。
+ * verdict() 是纯函数，边界值逐个钉死。
+ */
+test('90 / 95 两条线的边界', () => {
+  const at = (cpu, mem) => verdict({ cpu, mem }).exit;
+
+  assert.equal(at(10, 10), 0, '低负载应放行');
+  assert.equal(at(89.9, 10), 0, '89.9 还没到线');
+  assert.equal(at(90, 10), 10, '正好 90 应停派单（≥ 不是 >）');
+  assert.equal(at(10, 90), 10);
+  assert.equal(at(94.9, 10), 10, '94.9 仍是停派单');
+  assert.equal(at(95, 10), 20, '95 应升到停重活');
+  assert.equal(at(10, 99), 20);
+});
+
+test('任一超线就拦，不看另一项', () => {
+  assert.equal(verdict({ cpu: 5, mem: 96 }).exit, 20, 'CPU 低但内存爆了也要拦');
+  assert.equal(verdict({ cpu: 96, mem: 5 }).exit, 20, '内存低但 CPU 爆了也要拦');
+});
+
+test('量不了时返回 3，不能当成可以通过', () => {
+  assert.equal(verdict(null).exit, 3);
+  assert.equal(verdict({ cpu: null, mem: 10 }).exit, 3);
+  // 关键：3 必须不是 0 —— 调用方一律当「别派」处理
+  assert.notEqual(verdict(null).exit, 0);
+});
+
+test('标签与退出码一一对应', () => {
+  assert.equal(verdict({ cpu: 1, mem: 1 }).label, '✓ 可派单');
+  assert.equal(verdict({ cpu: 91, mem: 1 }).label, '⚠ 停止派单');
+  assert.equal(verdict({ cpu: 99, mem: 1 }).label, '⛔ 停重活');
+});
