@@ -1,6 +1,10 @@
 ---
 name: workbench-discipline
 description: 多项目/多客户并行时的防污染规矩。切项目、交叉引用资料前用。
+version: 1.0.0
+source: handwritten
+permissions: [read-only]
+
 ---
 
 # 工作纪律 —— 东西归谁、谁能写
