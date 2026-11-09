@@ -77,15 +77,22 @@ export function buildStatus(dataDir, { now = Date.now(), traceLimit = 200 } = {}
     // 待人工确认的任务要露出来。
     // 状态机故意不让失败任务自动重跑（有副作用的操作重来可能更糟），
     // 但只统计个数字等于把问题藏起来——用户看不到是哪些、为什么卡住。
+    // 自检没过也算「等你处理」：它做完了、但没达标。
+    // 不列出来的话，这类任务在面板上显示为成功，只有翻任务页才发现。
     const needsAttention = Object.values(tasks.tasks)
-      .filter((t) => t?.status === 'needs_reconciliation')
+      .filter((t) => t?.status === 'needs_reconciliation'
+        || (t?.deliveredOnly === true && t?.acceptanceResult === 'fail'))
       .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
       .slice(0, 10)
       .map((t) => ({
         taskId: t.taskId ?? null,
         title: String(t.title ?? '').slice(0, 120),
-        error: String(t.lastError ?? '').slice(0, 200),
+        error: String(t.acceptanceResult === 'fail'
+          ? (t.acceptanceReason ?? '自检没过')
+          : (t.lastError ?? '')).slice(0, 200),
         deferCount: t.deferCount ?? 0,
+        acceptance: t.acceptanceResult ?? null,
+        acceptanceReason: t.acceptanceReason ?? null,
         updatedAt: t.updatedAt ?? 0,
       }));
     return { ok: true, total: Object.keys(tasks.tasks).length, byStatus, needsAttention };
