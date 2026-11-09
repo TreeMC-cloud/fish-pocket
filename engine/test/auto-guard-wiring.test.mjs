@@ -51,17 +51,35 @@ test('没有场景时提醒一次，且不重复', async () => {
 
 // ── 技能记账接线 ─────────────────────────────────────
 
-test('加载技能时记一次（结果是未知，不算成功）', async () => {
+test('技能只在加载时记名，账留到 turn/end 用真实结果记', async () => {
   const d = tmp();
   const { g } = await boot(d);
   const session = { header: { id: 's1', origin: 'user' }, ownEvents: () => [] };
   g.onToolResult(session, { data: { name: 'skill', args: { name: 'cost-guard' }, message: { content: [] } } });
 
   const { load } = await import('../runtime/skill-stats.mjs');
+  assert.equal(load(d).skills['cost-guard'], undefined,
+    '加载时不该记账：那时只能记「未知」，等于永远算不出失败率');
+
+  // 这一轮失败结束：技能要背一次失败，而不是「未知」。
+  g.onTurnEnd(session, { data: { turn: 1, reason: { kind: 'error', error: { message: 'boom' } } } });
   const entry = load(d).skills['cost-guard'];
   assert.equal(entry.uses, 1);
-  assert.equal(entry.unknown, 1, '加载成功不等于解决问题，必须记未知');
+  assert.equal(entry.failures, 1, '这一轮失败了，技能要记一次失败');
+  assert.equal(entry.unknown, 0, '有真实结果时不该再记未知');
+});
+
+test('同一轮成功结束：技能记成功', async () => {
+  const d = tmp();
+  const { g } = await boot(d);
+  const session = { header: { id: 's1', origin: 'user' }, ownEvents: () => [] };
+  g.onToolResult(session, { data: { name: 'skill', args: { name: 'scene' }, message: { content: [] } } });
+  g.onTurnEnd(session, { data: { turn: 1, reason: { kind: 'completed' } } });
+  const { load } = await import('../runtime/skill-stats.mjs');
+  const entry = load(d).skills['scene'];
+  assert.equal(entry.uses, 1);
   assert.equal(entry.failures, 0);
+  assert.equal(entry.unknown, 0);
 });
 
 // ── 产物校验接线 ─────────────────────────────────────
@@ -150,4 +168,41 @@ test('非 JS 文件的编辑直接放行（不假装能检查语法）', async (
     () => 'PASS',
   );
   assert.equal(verdict, 'PASS');
+});
+
+// ── 上下文闸门 ───────────────────────────────────────
+
+test('工具输出超过上限：截断后交给模型，首尾都留', async () => {
+  const d = tmp();
+  const { hooks } = await boot(d);
+  const hook = hooks['tools/post-execute'];
+  assert.ok(hook, 'post-execute 钩子要注册上');
+
+  const big = 'A'.repeat(60000) + 'MIDDLE' + 'B'.repeat(60000);
+  const decision = hook({ name: 'bash' }, { content: [{ type: 'text', text: big }] });
+  assert.equal(decision.kind, 'accept');
+  const out = decision.content[0].text;
+  assert.ok(out.length < big.length, '必须变短');
+  assert.ok(out.startsWith('A'), '开头要留');
+  assert.ok(out.endsWith('B'), '结尾要留');
+  assert.ok(!out.includes('MIDDLE'), '中间要省略');
+  assert.ok(out.includes('已截断'), '要写明被截断，否则模型以为拿到了全量');
+});
+
+test('正常大小的工具输出原样通过', async () => {
+  const d = tmp();
+  const { hooks } = await boot(d);
+  const decision = hooks['tools/post-execute']({ name: 'bash' }, { content: [{ type: 'text', text: 'ok' }] });
+  assert.equal(decision.kind, 'accept');
+  assert.equal(decision.content, undefined, '没超限就不该改写');
+});
+
+test('非文本块不受影响（图片等）', async () => {
+  const d = tmp();
+  const { hooks } = await boot(d);
+  const decision = hooks['tools/post-execute']({ name: 'bash' }, {
+    content: [{ type: 'image', data: 'xxx' }, { type: 'text', text: 'y'.repeat(50000) }],
+  });
+  assert.equal(decision.kind, 'accept');
+  assert.equal(decision.content[0].type, 'image', '图片块必须原样保留');
 });
