@@ -31,6 +31,7 @@ import { load as loadRegistry } from './task-registry.mjs';
 import { deriveCandidates, appendCandidates, candidateFile } from './candidates.mjs';
 import { mergeAgentsMd, BUNDLED_END } from './agents-md.mjs';
 import { createNoticeAdmission } from './notice-admission.mjs';
+import { evaluate as evaluateProactive, runProactive } from './proactive.mjs';
 
 const TMP_PREFIX = 'selftest-';
 
@@ -157,6 +158,31 @@ export async function runSelfTest() {
         ? (unknownBlocked ? '5 种已知通知全部放行，未知类型被拦' : '未知类型没被拦住（白名单失效）')
         : `这些类型会被静默丢弃：${dropped.join(', ')}`,
     };
+  }));
+
+  // ── 6. 主动层：该动的时候动，不该动的时候不动 ──
+  items.push(await check('proactive', '主动层（反复失败会自己派活，冷却后不重复）', () => {
+    const d = tmpDir();
+    try {
+      const lines = [];
+      const base = Date.now() - 10_000;
+      for (let i = 0; i < 8; i += 1) {
+        lines.push(JSON.stringify({ at: base + i * 100, ok: i < 2, summary: '依赖缺失', tags: ['构建'] }));
+      }
+      fs.writeFileSync(path.join(d, '.trace.jsonl'), lines.join('\n') + '\n');
+
+      const triggers = evaluateProactive(d);
+      let enqueued = 0;
+      runProactive(d, { sessionId: 'S1', enqueue: () => { enqueued += 1; }, notify: () => {} });
+      runProactive(d, { sessionId: 'S1', enqueue: () => { enqueued += 1; }, notify: () => {} });
+
+      return {
+        ok: triggers.length === 1 && enqueued === 1,
+        detail: triggers.length === 1
+          ? (enqueued === 1 ? '识别到反复失败并派活一次，冷却生效' : `派了 ${enqueued} 次（冷却失效）`)
+          : `触发项数量不对：${triggers.length}`,
+      };
+    } finally { cleanup(d); }
   }));
 
   const passed = items.filter((i) => i.ok).length;
