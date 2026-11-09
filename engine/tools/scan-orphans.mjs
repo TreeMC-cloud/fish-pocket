@@ -133,16 +133,48 @@ function isEntryPoint(file, engineDir) {
   const rel = path.relative(engineDir, file).split(path.sep).join('/');
   if (rel === 'main.mjs' || rel === 'boot.mjs') return true;
   if (/^plugins\/[^/]+\/index\.mjs$/.test(rel)) return true;
+  // skills/<name>/*.mjs：技能自带的可执行脚本，由 agent 用 shell 调用
+  // （`node skills/cost-guard/turns.mjs status`），本来就不该被 import。
+  // 把它们算孤儿会淹没真正的问题——34 个"孤儿"里有 22 个是这一类。
+  if (/^skills\/[^/]+\/[^/]+\.mjs$/.test(rel)) return true;
+  // shims/：给原生模块打补丁，由构建脚本按路径注入，不经 import。
+  if (/^shims\//.test(rel)) return true;
   return false;
 }
 
 export function scan(engineDir = ENGINE) {
   const files = walk(engineDir);
+
   // 引用收集必须覆盖**所有**文件，包括入口和插件。
-  // 之前的 bug：先把入口文件 continue 掉，于是 plugins/*/index.mjs 里的
+  // 曾经的 bug：先把入口文件 continue 掉，于是 plugins/*/index.mjs 里的
   // 那 12 个 createRequire 引用一条都没被收集，它们加载的模块全被误报成孤儿。
+  //
+  // 每个文件只解析一次，结果放进 refs 表复用：
+  //   1) 收集 refd 时用一遍，2) 判「自己只引用自己」时又用一遍。
+  // 之前是各算一次，两处口径一旦分叉就会互相矛盾，所以合并成单一来源。
+  const refs = new Map();
   const refd = new Set();
-  for (const f of files) for (const r of refsOf(f)) refd.add(r);
+  for (const f of files) {
+    const rs = refsOf(f);
+    refs.set(f, rs);
+    for (const r of rs) refd.add(r);
+  }
+
+  // 第二类「引用」：路径以**字符串**出现，不经过模块系统。
+  //   - new Worker('./sync-helper.mjs')  /  new URL('./worker-main.mjs', import.meta.url)
+  //   - 构建脚本里的 `node smoke.mjs`
+  // 这些模块确实在用，只是没被 import。只认 import 会把它们误报成孤儿
+  // （worker-main / sync-helper 就是这么被误判的：它们由 Worker 按路径拉起）。
+  for (const f of files) {
+    let text;
+    try { text = fs.readFileSync(f, 'utf8'); } catch { continue; }
+    const dir = path.dirname(f);
+    for (const m of text.matchAll(/['"]([^'"\n]*\.mjs)['"]/g)) {
+      const spec = m[1];
+      if (!spec.startsWith('.') && !spec.startsWith('/')) continue;
+      refd.add(path.resolve(dir, spec));
+    }
+  }
 
   const orphans = [];
   const clis = [];
@@ -150,8 +182,20 @@ export function scan(engineDir = ENGINE) {
   const used = [];
   for (const f of files) {
     if (isEntryPoint(f, engineDir)) { entries.push(f); continue; }
-    // 自己引用自己不算被引用
-    const selfRefOnly = refsOf(f).every((r) => r === f);
+
+    // 「自己引用自己不算被引用」——但**必须要求确实有引用**。
+    //
+    // 这里原来写的是 refsOf(f).every((r) => r === f)，漏了「非空」这个前提：
+    // 空数组的 every() 恒为 true（vacuous truth），于是**所有零 import 的文件**
+    // 都被判成 selfRefOnly，哪怕别人明明 import 了它。
+    // capability-status / task-runner / schedule-bridge 这三个恰好只依赖 node:*
+    // 内置模块、没有任何本地 import，于是被 auto-guard 的 createRequire 引用着
+    // 却仍被报成「真孤儿」——正是最典型的「机制在、接线无」误报。
+    //
+    // 判据改成：有引用，且每一条都指向自己，才叫自引用。
+    const own = refs.get(f) ?? [];
+    const selfRefOnly = own.length > 0 && own.every((r) => r === f);
+
     if (!refd.has(f) || selfRefOnly) {
       (isCli(f) ? clis : orphans).push(f);
     } else {
@@ -179,7 +223,7 @@ function rel(f, base) { return path.relative(base, f); }
 function printHuman(r) {
   const base = r.engineDir;
   console.log(`引擎模块扫描 · ${base}`);
-  console.log(`共 ${r.counts.total} 个 .mjs：被引用 ${r.counts.used} · 入口 ${r.counts.entries} · 合法 CLI ${r.counts.clis} · 真孤儿 ${r.counts.orphans}`);
+  console.log(`共 ${r.counts.total} 个 .mjs：被引用 ${r.counts.used} · 入口/技能/补丁 ${r.counts.entries} · 合法 CLI ${r.counts.clis} · 真孤儿 ${r.counts.orphans}`);
   console.log('');
 
   if (r.orphans.length > 0) {
