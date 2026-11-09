@@ -140,3 +140,13 @@ test('writeSelfCheck 落盘 selfcheck.json，且可被读回', async () => {
   const leftovers = fs.readdirSync(dir).filter((n) => n.includes('.tmp'));
   assert.deepEqual(leftovers, []);
 });
+
+test('writeSelfCheck 目录不存在时先建目录，报告不自相矛盾', async () => {
+  const dir = path.join(tmp(), 'nested', 'data');
+  const written = await writeSelfCheck(dir);
+
+  assert.equal(written.file, path.join(dir, 'selfcheck.json'));
+  // 报告写出来了，就不能同时说「目录不可写」。
+  assert.equal(written.items.find((i) => i.id === 'writable').ok, true);
+  assert.equal(fs.existsSync(path.join(dir, 'selfcheck.json')), true);
+});
