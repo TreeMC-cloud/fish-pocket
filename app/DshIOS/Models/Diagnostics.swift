@@ -337,6 +337,15 @@ final class Diagnostics {
         return data
     }
 
+    /// 单条截断：长回答保留开头和结尾，中间省略——首尾最能说明意图与结论。
+    /// 放在这里而不是 SessionModel：日志的截断规则应该和日志本身在一起。
+    nonisolated static func clip(_ text: String, limit: Int = 1200) -> String {
+        guard text.count > limit else { return text }
+        let head = text.prefix(limit * 2 / 3)
+        let tail = text.suffix(limit / 3)
+        return "\(head)\n…（省略 \(text.count - limit) 字）…\n\(tail)"
+    }
+
     /// 时间戳只 init 一次：每次 new 一个 formatter 在 20 秒一轮的循环里是浪费，
     /// 而且这个类全程 @MainActor，不存在线程竞争。
     private static let stampFormatter = ISO8601DateFormatter()
@@ -350,6 +359,19 @@ final class Diagnostics {
     /// 手动发一批（设置页的「立即上报」）：不必等 20 秒的循环。
     func pushNow() {
         Task { await pushOnce() }
+    }
+
+    /// 回到前台时叫醒上报循环。
+    ///
+    /// 为什么需要：循环是一条 `Task` + `Task.sleep(20s)`。App 进后台时 iOS
+    /// 挂起整个进程，sleep 不会走；被系统杀掉再拉起时 `init` 会重建循环，
+    /// 但「只是切到后台再回来」这条路没人叫醒它——表现就是日志明明在长，
+    /// 服务器上却一直停在最后一次。所以前台时显式重启一次（restart 自带去重）。
+    func resume() {
+        guard enabled else { return }
+        // 刚回到前台先把攒着的一批发掉，别让用户等 20 秒。
+        Task { await pushOnce() }
+        restart()
     }
 
     /// 从头重发：换服务器或怀疑漏报时用。只改游标，不动已发送计数。
@@ -382,6 +404,13 @@ final class Diagnostics {
         let url = appLogFile
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
                                                  withIntermediateDirectories: true)
+        // 按 2 MB 轮转。现在每条对话都记，不设上限的话几个月后会变成几十 MB，
+        // 而 readChunk 一轮最多读 256 KB——积压太多就永远追不上新日志。
+        // 轮转后文件变小，readChunk 里的 `size < cursor` 分支会自动从 0 重读。
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+           let size = attrs[.size] as? Int, size > 2 * 1024 * 1024 {
+            try? FileManager.default.removeItem(at: url)
+        }
         if let handle = try? FileHandle(forWritingTo: url) {
             _ = try? handle.seekToEnd()
             try? handle.write(contentsOf: data)
