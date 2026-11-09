@@ -200,6 +200,14 @@ function requireSceneSchema() {
   return globalThis.__sceneSchemaMod;
 }
 
+function requireProactive() {
+  if (!globalThis.__proactiveMod) {
+    const req = createRequire(import.meta.url);
+    globalThis.__proactiveMod = req('../../runtime/proactive.mjs');
+  }
+  return globalThis.__proactiveMod;
+}
+
 function requireSelfTest() {
   if (!globalThis.__selfTestMod) {
     const req = createRequire(import.meta.url);
@@ -430,6 +438,11 @@ ctx.effect(() => {
       try { requireTaskControl().drain(router, this.dataDir()); } catch { /* 控制面坏了不影响调度 */ }
 
       const result = await tick(router);
+
+      // 主动层：看一遍状态，自己决定要不要动。
+      // 放在 tick 之后：先把手头的活干完，再看有没有新问题。
+      try { await this.maybeProactive(router); } catch { /* 主动层坏了不影响调度 */ }
+
       if (result.started.length > 0) {
         try {
           this.ctx.logger?.info?.(
@@ -938,6 +951,42 @@ ctx.effect(() => {
    * 代价：只有用户在用时才会整理。对单机 App 这是物理限制，不是设计选择。
    * 真正的定时整理要 Phase 3 的常驻 Hub。
    */
+  /**
+   * 主动层：每 5 分钟最多看一次状态。
+   *
+   * 为什么单独限流：调度循环本身 15 秒一拍，但「有没有新问题」这种判断
+   * 没必要那么频繁——文件读写 + 聚类都是成本，而问题不会 15 秒变一次。
+   */
+  async maybeProactive(router) {
+    const now = Date.now();
+    if (now - (this.lastProactiveCheck ?? 0) < 5 * 60_000) return;
+    this.lastProactiveCheck = now;
+
+    // 派给哪个会话：用最近一次真正在用的那个。
+    // 没有活跃会话就只做「提醒」类动作，不派活——派给不存在的会话等于空转。
+    const sessionId = this.lastSessionId ?? null;
+
+    try {
+      const { runProactive } = requireProactive();
+      const control = requireTaskControl();
+      const r = runProactive(this.dataDir(), {
+        now,
+        sessionId,
+        enqueue: ({ sessionId: target, text, eventId }) => {
+          const out = control.handle(router, { action: 'enqueue', sessionId: target, text, eventId });
+          if (!out?.ok) throw new Error(out?.error ?? '投递被拒');
+          return out;
+        },
+        notify: ({ kind, message }) => this.notify(message, { kind }),
+      });
+      if (r.acted.length > 0) {
+        try {
+          this.ctx.logger?.info?.(`[auto-guard] 主动: ${r.acted.map((a) => `${a.action}:${a.id}`).join(', ')}`);
+        } catch { /* 无 logger */ }
+      }
+    } catch { /* 主动层是增值功能，坏了不能拖累调度 */ }
+  }
+
   maybeDream() {
     const now = Date.now();
     if (now - (this.lastDreamCheck ?? 0) < 10 * 60_000) return;   // 10 分钟最多看一次
@@ -1009,6 +1058,9 @@ ctx.effect(() => {
       const reason = event?.data?.reason?.kind;
       // 记忆插件自己发的内省轮次不算工作，记进来会污染统计。
       if (String(session?.header?.origin ?? '') === 'subagent') return;
+      // 记下最近的用户会话：主动层要派活，总得知道派给谁。
+      // 只认用户会话——派给子代理会自己套自己。
+      this.lastSessionId = sessionId(session);
 
       // 技能效果：本轮加载过的技能，配上这一轮的真实结果。
       //   completed → 成功（ok=true）
