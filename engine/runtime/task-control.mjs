@@ -76,6 +76,7 @@ export function handle(router, request) {
         eventId,
         title: text.slice(0, 200),
         note: text,
+        acceptance: request?.acceptance ? String(request.acceptance) : null,
         threadKey: sessionId,
       }, {
         allowedSources: ['user', 'schedule', 'agent-message', 'webhook', 'external'],
