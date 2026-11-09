@@ -313,6 +313,11 @@ export class Router {
       }
 
       if (outcome?.ok) {
+        // 投递型任务：只把消息塞进会话，真正的成败在那一轮里。
+        // 标记出来，任务表显示「已投递」而不是「已完成」——
+        // 否则一轮失败后表里仍是 succeeded，这个账本就不可信了。
+        if (outcome.delivered === true) t.deliveredOnly = true;
+
         // 交付 gate：ok:true 只说明「没抛异常」，不等于「东西真的出来了」。
         // 不过 gate 就不算成功——改成 needs_reconciliation，让人看一眼。
         // 这是抄 Blender 插件那条：gate 不过就阻止交付，而不是给个警告继续走。
