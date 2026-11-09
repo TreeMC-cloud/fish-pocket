@@ -543,7 +543,7 @@ ctx.effect(() => {
     return null;
   }
 
-  onTurnStart(session) {
+  onTurnStart(session, event) {
     const s = this.runtime(session);
     s.turns += 1;
 
@@ -551,13 +551,22 @@ ctx.effect(() => {
     // 重启后提示「3 个任务被打断」只会让人莫名其妙——父会话自己会报。
     // （onTurnEnd 里原本就有同样的过滤，两处必须一致。）
     if (String(session?.header?.origin ?? '') !== 'subagent') {
-      // turn/start 的 event.data 在部分 Harness 版本不带 turn 编号；session
-      // 的持久事件列表里刚追加的 turn/start 带有确切 turn，用它而不是猜 s.turns
-      //（后者是插件进程内计数，重启后会从 1 重新开始）。
+      // turn 号三个来源，按可靠性排序：
+      //   1. 事件自身 `event.data.turn`（turn/start 一定带，最可靠）
+      //   2. 会话事件列表里最后一条 turn/start
+      //   3. 放弃（记为 null，不猜 s.turns——那是插件进程内计数，
+      //      重启后从 1 重来，拿它当幂等键会跟历史任务撞车）
+      //
+      // 之前只用了第 2 种，而真机上 session 对象未必有 ownEvents()/events
+      // （结构随 Harness 版本变），于是 turn 永远是 undefined，
+      // `Number.isInteger(turn)` 为 false，tasks.json 一次都没被写过。
+      // 而 onTurnStart 连 event 参数都没接收，第 1 种来源根本没机会用。
+      const eventTurn = Number.isInteger(event?.data?.turn) ? event.data.turn : null;
       const events = typeof session?.ownEvents === 'function' ? session.ownEvents() : session?.events;
-      const turn = Array.isArray(events)
+      const listTurn = Array.isArray(events)
         ? [...events].reverse().find((item) => item?.type === 'turn/start')?.data?.turn
         : undefined;
+      const turn = eventTurn ?? (Number.isInteger(listTurn) ? listTurn : null);
       this.inFlight.set(sessionId(session), { at: Date.now(), step: '', turn: Number.isInteger(turn) ? turn : null });
       this.persistInFlight();
 
@@ -904,11 +913,26 @@ ctx.effect(() => {
       // 之前的实现对整个会话历史取「最后一条 user / assistant」，导致上一轮的
       // 内容被当成这一轮的摘要——交错两轮之后，trace 记的是旧任务，蒸馏出来
       // 的「经验」指向错误的事件。会话越长，错得越隐蔽。
+      //
+      // ⚠⚠ 但**不能假设 list 一定有内容**。真机上 session 对象未必有
+      // ownEvents()/events（结构随版本变），那时 list 是空数组：
+      //   - turn 取不到 → tasks.json 不写
+      //   - summary 为空 → `if (!summary) return` → .trace.jsonl 不写
+      // 而 capability.json / .turns.jsonl 在这之前，照样写。
+      // 表现就是「部分文件有、部分没有」——正是真机上看到的样子。
+      // 所以：事件列表只当**补充**，必需信息优先从 turn/end 事件自身取。
       let start = -1;
       for (let i = list.length - 1; i >= 0; i -= 1) {
         if (list[i]?.type === 'turn/start') { start = i; break; }
       }
       const current = start >= 0 ? list.slice(start) : list;
+
+      // turn 号：事件自带的最可靠（`turn/end` 的 data.turn 就是本轮编号）。
+      const eventTurn = Number.isInteger(event?.data?.turn) ? event.data.turn : null;
+      const listTurn = Array.isArray(list)
+        ? [...list].reverse().find((item) => item?.type === 'turn/start')?.data?.turn
+        : undefined;
+      const turn = eventTurn ?? (Number.isInteger(listTurn) ? listTurn : null);
 
       const tools = [];
       let userText = '';
@@ -937,8 +961,12 @@ ctx.effect(() => {
         }
       }
 
-      const summary = assistantText || userText;
-      if (!summary) return;   // 空轮次没必要记
+      // 摘要兜底：拿不到会话事件时，至少把「这一轮是什么结局」记下来。
+      // 记一条"只有结果、没有内容"的经验，比一条都不记强——后者会让进化闭环
+      // 完全断掉（蒸馏永远没有原料），而前者至少能统计成功率、发现失败模式。
+      const summary = assistantText || userText
+        || (turn ? `第 ${turn} 轮（${reason ?? '未知结果'}，未取到会话内容）` : '');
+      if (!summary) return;   // 连轮次都没有，才是真的空轮次
 
       appendJsonlBounded(this.traceFile(), {
         at: Date.now(),
