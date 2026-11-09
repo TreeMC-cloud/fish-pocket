@@ -107,36 +107,50 @@ export function onTurnStart(dataDir, { sessionId, turn, title }, now = Date.now(
  * 失败/中断**不直接回到 queued**——有副作用的操作必须先人工核对，
  * 这是状态机本来的意图（needs_reconciliation）。
  */
-export function onTurnEnd(dataDir, { sessionId, turn, reasonKind, error }, now = Date.now()) {
+export function onTurnEnd(dataDir, { sessionId, turn, reasonKind, error, acceptance = null }, now = Date.now()) {
   if (!sessionId || !Number.isInteger(turn)) return null;
   let state;
   try { state = registry.load(dataDir); } catch { return null; }
 
-  const taskId = state.idempotency?.[keyOf(sessionId, turn)];
-  if (!taskId) return null;
-  const task = state.tasks[taskId];
-  if (!task) return null;
+  // 轮次键只对「每轮一个」的任务有效。外部投递的任务幂等键是
+  // `external:<eventId>`，用 turn 键查不到——所以找不到时**不能直接返回**，
+  // 否则收尾、投递结果、自检结果全都写不进去（外部任务永远停在「已投递」）。
+  const taskId = state.idempotency?.[keyOf(sessionId, turn)] ?? null;
+  const task = taskId ? state.tasks[taskId] : null;
 
   const to = outcomeOf(reasonKind);
-  if (!to) return null;                       // 不认识的 reason：不动
-  if (task.status !== 'running') return null; // 已经收尾过（重复事件）
-
-  try {
-    registry.transition(state, taskId, to, { by: 'auto-guard', error: error ?? null, now });
-  } catch {
-    return null;
+  let transitioned = null;
+  if (task && to && task.status === 'running') {
+    try {
+      registry.transition(state, taskId, to, { by: 'auto-guard', error: error ?? null, now });
+      transitioned = to;
+      try { registry.save(state, dataDir); } catch { /* 同上 */ }
+    } catch { /* 转移失败：下面照样做投递/自检回写 */ }
   }
-  try { registry.save(state, dataDir); } catch { /* 同上 */ }
 
   // 顺手把「投递型」任务的真实结果补上。
   // Router 的任务在 agent.inject() 后就标 succeeded 了——那只代表消息投进去了。
   // 这一轮真实跑完的成败，只有 turn/end 知道。不回写的话，任务表永远停在
   // 「已投递」，会话失败它也显示正常，账本就不可信了。
   const reconciled = reconcileDelivered(state, { sessionId, reasonKind, now });
-  if (reconciled > 0) {
+
+  // 自检结果：模型在最后一行写的 `ACCEPT: PASS / FAIL <原因>`。
+  // 没有这个标记就说明它没按格式收工——记为 null（未评），不硬判失败：
+  // 老任务、闲聊轮次本来就没有完成标准。
+  if (acceptance && typeof acceptance === 'object') {
+    const ok = setAcceptance(state, {
+      sessionId, result: acceptance.result, reason: acceptance.reason, now,
+    });
+    if (ok > 0) reconciled && (state._acceptanceWritten = true);
+  }
+
+  if (reconciled > 0 || acceptance != null) {
     try { registry.save(state, dataDir); } catch { /* 尽力而为 */ }
   }
-  return { taskId, status: to, reconciled };
+  // 什么都没做就返回 null：调用方（auto-guard）靠这个判断「这一轮无需记账」，
+  // 也方便测试断言「重复事件 / 未知 reason 不该产生动作」。
+  if (transitioned == null && reconciled === 0 && acceptance == null) return null;
+  return { taskId, status: transitioned, reconciled };
 }
 
 /**
@@ -149,6 +163,28 @@ export function onTurnEnd(dataDir, { sessionId, turn, reasonKind, error }, now =
  * 刻意**不改 status**：succeeded 是终态，状态机的 TRANSITIONS 不允许回退，
  * 而且"投递成功"本身也是事实。所以只加一个 `turnOutcome` 字段表示后续结果。
  */
+/**
+ * 把「自检结果」写进最近一条投递型任务。
+ *
+ * 只认投递型：普通轮次任务（每轮一个）没有完成标准，不该被标记。
+ * 也只在还没写过时写——同一轮重复的 turn/end 不该覆盖第一次判定。
+ */
+export function setAcceptance(state, { sessionId, result, reason = null, now = Date.now(), windowMs = 30 * 60_000 } = {}) {
+  if (!sessionId || (result !== 'pass' && result !== 'fail')) return 0;
+  let count = 0;
+  for (const task of Object.values(state.tasks ?? {})) {
+    if (task?.deliveredOnly !== true) continue;
+    if (task.threadKey !== sessionId) continue;
+    if (task.acceptanceResult != null) continue;      // 已评过
+    if (now - (task.updatedAt ?? 0) > windowMs) continue;
+    task.acceptanceResult = result;
+    task.acceptanceReason = reason ? String(reason).slice(0, 300) : null;
+    task.acceptanceAt = now;
+    count += 1;
+  }
+  return count;
+}
+
 export function reconcileDelivered(state, { sessionId, reasonKind, now = Date.now(), windowMs = 30 * 60_000 } = {}) {
   if (!sessionId) return 0;
   let count = 0;
