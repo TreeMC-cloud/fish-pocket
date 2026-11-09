@@ -72,15 +72,24 @@ final class EngineClient: NSObject, @unchecked Sendable, URLSessionTaskDelegate 
         let (data, response) = try await session.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard let reply = try? JSONDecoder().decode(JSON.self, from: data) else {
+            await Self.recordFailure(method, code: "HTTP_\(status)", message: "响应无法解析")
             throw EngineError(code: "HTTP_\(status)", message: "\(method) 返回了无法解析的响应（HTTP \(status)）", detail: .null)
         }
         let result = reply["result"]
         if result["ok"].bool == true { return result["value"] }
         let error = result["error"].isNull ? reply["error"] : result["error"]
-        throw EngineError(
-            code: error["code"].string,
-            message: error["message"].string ?? "\(method) 调用失败",
-            detail: error
-        )
+        let code = error["code"].string
+        let message = error["message"].string ?? "\(method) 调用失败"
+        await Self.recordFailure(method, code: code, message: message)
+        throw EngineError(code: code, message: message, detail: error)
+    }
+
+    /// RPC 失败记一条。成功的调用不记：每 3 秒的投影刷新会把日志刷爆，
+    /// 而排查时需要的是「哪一个请求失败了、错在哪」。
+    private static func recordFailure(_ method: String, code: String?, message: String) async {
+        let detail = code.map { "\(method) · \($0) · \(message)" } ?? "\(method) · \(message)"
+        await MainActor.run {
+            Diagnostics.shared.record("RPC 失败", Diagnostics.clip(detail, limit: 300))
+        }
     }
 }
