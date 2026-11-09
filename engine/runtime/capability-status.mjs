@@ -218,7 +218,16 @@ function headlineOf({ taskStats, dream, skills, interrupts, alerts, trace, turns
   if (dream.ok && dream.runs > 0) parts.push(`整理过 ${dream.runs} 次`);
   if (skills.ok && skills.tracked > 0) parts.push(`用过 ${skills.tracked} 个技能`);
   if (alerts.length > 0) parts.push(`${alerts.length} 条告警`);
-  if (parts.length === 0) return '还没开始干活';
+  if (parts.length === 0) {
+    // 空状态要说清「哪些源是空的」。
+    // 只说「还没开始干活」的话，用户没法判断是「真的没聊过」还是
+    // 「聊了但记账没生效」——而这两个的处理方式完全不同。
+    const missing = [];
+    if (!taskStats.ok || taskStats.total === 0) missing.push('任务表');
+    if (!trace?.ok || trace.total === 0) missing.push('经验记录');
+    if (!turns?.ok || turns.total === 0) missing.push('轮次账本');
+    return `还没开始干活（${missing.join('、')}均无记录）`;
+  }
   return parts.join(' · ');
 }
 
