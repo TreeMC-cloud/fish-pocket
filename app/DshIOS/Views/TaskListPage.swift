@@ -11,6 +11,8 @@ import SwiftUI
 /// 而且这几条路径（重排/取消）本来就设计成走文件控制面（`task-control`）。
 struct TaskListPage: View {
     @Environment(AppModel.self) private var app
+    @State private var composing = false
+    @State private var draft = ""
     @State private var snapshot: TaskSnapshot?
     @State private var loading = false
 
@@ -80,12 +82,62 @@ struct TaskListPage: View {
         }
         .groupedList()
         .navigationTitle("任务")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { draft = ""; composing = true } label: {
+                    Image(systemName: "plus.circle")
+                }
+                .accessibilityLabel("投递新任务")
+            }
+        }
+        .sheet(isPresented: $composing) { composeSheet }
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }
         .task { if snapshot == nil { await load() } }
     }
 
     // MARK: - 行
+
+    /// 投递新任务的表单。
+    ///
+    /// 引擎早就有 enqueue（建任务 → 排队 → 投进会话），但 App 里没有入口——
+    /// 能力在，用户点不到。这个表单把它接出来。
+    private var composeSheet: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("让它做什么（写清目标与边界）", text: $draft, axis: .vertical)
+                        .lineLimit(3...8)
+                } header: {
+                    Text("任务内容")
+                } footer: {
+                    Text("引擎会把它排进队列，App 活着时约 15 秒内投进当前会话。写清「要什么结果」，而不是「去看看吧」。")
+                }
+                .groupedRow()
+            }
+            .groupedList()
+            .navigationTitle("投递任务")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { composing = false }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("投递") {
+                        guard let session = app.currentSession,
+                              app.enqueueTask(text: draft, sessionId: session) else {
+                            app.showToast(String(localized: "没有可投递的会话，先打开一个对话"), duration: 5)
+                            return
+                        }
+                        Haptics.tap()
+                        composing = false
+                        app.showToast(String(localized: "已投递，约 15 秒内开始"), duration: 4)
+                    }
+                    .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+    }
 
     private func row(_ task: TaskSnapshot.Row, actionable: Bool) -> some View {
         VStack(alignment: .leading, spacing: 6) {
