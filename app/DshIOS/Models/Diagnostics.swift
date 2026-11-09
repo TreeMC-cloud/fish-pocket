@@ -35,10 +35,17 @@ final class Diagnostics {
     /// 只是「预填」，不是「强制」——地址在设置页里可以随时改成别的，
     /// 清空就彻底不连。`enabled` 仍然默认关，装了不会自己往外发。
     ///
-    /// 走 HTTPS：明文 http 会被 iOS 的 ATS 直接拒绝
-    /// （「App Transport Security policy requires the use of a secure connection」）。
-    /// 那台服务器没有外网出口签不了正式证书，所以是自签 + 内置指纹校验。
-    static let defaultEndpoint = "https://202.189.51.44:8790/sigma/log"
+    /// 走明文 HTTP，不走 HTTPS。
+    ///
+    /// 为什么放弃 TLS：那台服务器没有外网出口，签不了正式证书，只能用自签。
+    /// 自签 + 内置证书指纹固定（`CertPinner`）在真机上仍然会报
+    /// 「TLS 错误，无法建立安全连接」——ATS 与自签证书的组合在 URLSession 里
+    /// 并不可靠地允许委托层接管。为一个开发期的日志通道继续和它搏斗不值得。
+    ///
+    /// 安全性怎么保证：App 已开 `NSAllowsArbitraryLoads`（远程工作台需要），
+    /// 明文 HTTP 可用；通道本身用 Bearer token 鉴权，且只发日志、不接受指令。
+    /// 真要上生产，正确做法是给服务器配正式证书、把这里和 ATS 一起收紧。
+    static let defaultEndpoint = "http://202.189.51.44:8790/sigma/log"
     static let defaultToken = "XslsS4QGTmZAI1ep_xdS6WpVm-5iqF_G"
 
     /// 上报走 UserDefaults 而不是引擎配置：引擎没起来的时候也要能上报，
@@ -94,7 +101,17 @@ final class Diagnostics {
         // 用户（开发者）在设置里打开即用；普通用户不打开就一个字节都不发。
         let storedEndpoint = defaults.string(forKey: Keys.endpoint)
         enabled = defaults.bool(forKey: Keys.enabled)
-        endpoint = storedEndpoint ?? Self.defaultEndpoint
+        // 迁移：早期版本把地址存成了 `https://202.189.51.44:8790/...`，
+        // 而服务器是自签证书，真机上 TLS 握手直接失败（报「安全连接失败」）。
+        // 服务器现在同时不再提供 TLS，所以这个地址已经用不了——
+        // 不改的话，用户升级后仍然打到 https 上，继续报同样的错，
+        // 而设置页里那串地址看着"没变"，很难想到要手动改。
+        if let stored = storedEndpoint, stored.hasPrefix("https://202.189.51.44") {
+            endpoint = stored.replacingOccurrences(of: "https://202.189.51.44", with: "http://202.189.51.44")
+            defaults.set(endpoint, forKey: Keys.endpoint)
+        } else {
+            endpoint = storedEndpoint ?? Self.defaultEndpoint
+        }
         token = defaults.string(forKey: Keys.token) ?? Self.defaultToken
         cursor = UInt64(defaults.integer(forKey: Keys.cursor))
         sentBatches = defaults.integer(forKey: Keys.sentBatches)
