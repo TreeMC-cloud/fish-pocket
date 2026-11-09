@@ -78,7 +78,8 @@ export function makeRunTask({ ctx, createUserMessage, logger = null }) {
  * 明确写出来源，它才知道这是要执行的活。
  */
 export function buildPrompt(task) {
-  const title = String(task?.title ?? '').trim();
+  // 正文优先用 note：title 只有 200 字，装不下一条完整指令。
+  const title = String(task?.note ?? task?.title ?? '').trim();
   const source = String(task?.source ?? '');
   const origin = source.startsWith('session:') ? '自动重排' : source;
   return [
