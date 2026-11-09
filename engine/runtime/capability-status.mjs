@@ -13,6 +13,7 @@
 //      静默失败比失败本身更糟——用户会以为一切正常。
 
 import fs from 'node:fs';
+import { summarize as summarizeCost, describe as describeCost } from './cost.mjs';
 import path from 'node:path';
 
 /** 快照文件名，App 侧按同一名字读。 */
@@ -186,6 +187,12 @@ export function buildStatus(dataDir, { now = Date.now(), traceLimit = 200 } = {}
     }
     : { ok: false, reason: '定时任务还没被读取过', total: 0, due: 0, rows: [] };
 
+  // ── 用量 ──
+  // App 在 turn/end 写 usage.jsonl，这里只聚合。没有记录就是 null，不编。
+  const cost = (() => {
+    try { return summarizeCost(dataDir, { now }); } catch { return { ok: false, reason: '读取失败' }; }
+  })();
+
   // ── 最近告警 ──
   // notices.jsonl 是引擎到 App 的通道，这里回读最近的经营类事件（注入/中断/交付失败）
   const notices = readJsonl(at('notices.jsonl'));
@@ -201,7 +208,8 @@ export function buildStatus(dataDir, { now = Date.now(), traceLimit = 200 } = {}
     generatedAt: now,
     // 一句话总结：面板顶部直接显示，不用用户自己拼。
     // trace / turns 必须传进来：它们才是每轮真的在写的数据源。
-    headline: headlineOf({ taskStats, dream, skills, interrupts, alerts, trace, turns, schedules }),
+    headline: headlineOf({ taskStats, dream, skills, interrupts, alerts, trace, turns, schedules, cost }),
+    cost,
     taskStats,
     dream,
     skills,
@@ -214,7 +222,7 @@ export function buildStatus(dataDir, { now = Date.now(), traceLimit = 200 } = {}
 }
 
 /** 生成一句人话总结。空状态时说清楚"还没开始"，不说"一切正常"。 */
-function headlineOf({ taskStats, dream, skills, interrupts, alerts, trace, turns, schedules }) {
+function headlineOf({ taskStats, dream, skills, interrupts, alerts, trace, turns, schedules, cost }) {
   const parts = [];
   if (interrupts.running.length > 0) parts.push(`${interrupts.running.length} 个任务在跑`);
   if (taskStats.ok && taskStats.total > 0) parts.push(`${taskStats.total} 个任务记录`);
@@ -233,6 +241,8 @@ function headlineOf({ taskStats, dream, skills, interrupts, alerts, trace, turns
   if (schedules && schedules.ok && schedules.total > 0) parts.push(`${schedules.total} 个定时任务`);
   if (dream.ok && dream.runs > 0) parts.push(`整理过 ${dream.runs} 次`);
   if (skills.ok && skills.tracked > 0) parts.push(`用过 ${skills.tracked} 个技能`);
+  const costLine = describeCost(cost);
+  if (costLine) parts.push(costLine);
   if (alerts.length > 0) parts.push(`${alerts.length} 条告警`);
   if (parts.length === 0) {
     // 空状态要说清「哪些源是空的」。
