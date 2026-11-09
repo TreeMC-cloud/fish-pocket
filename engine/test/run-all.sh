@@ -58,6 +58,18 @@ for f in test/*.test.mjs; do
 
   p=$(echo "$out" | grep -E "^# pass" | awk '{print $3}')
   fl=$(echo "$out" | grep -E "^# fail" | awk '{print $3}')
+  # Node 24 默认用 spec reporter（`ℹ tests 1` / `✔ …`），不再输出 TAP 的 `# pass`。
+  # 两种格式都要认，否则 CI 上每个测试都成了"没有输出汇总"。
+  if [ -z "$p" ]; then
+    p=$(echo "$out" | grep -E "^ℹ pass" | awk '{print $3}')
+    fl=$(echo "$out" | grep -E "^ℹ fail" | awk '{print $3}')
+  fi
+  if [ -z "$p" ]; then
+    # 再退一步：数 ✔ 的个数（spec 格式单文件汇总缺失时的兜底）
+    p=$(echo "$out" | grep -c "✔")
+    fl=$(echo "$out" | grep -c "✖")
+    [ "$p" = "0" ] && p=""
+  fi
   if [ -z "$p" ]; then
     # 没有 TAP 汇总行：把前几行打出来，否则"为什么失败"要靠猜。
     # 注意 rc 可能在部分 shell 下没被赋值（set -u 会直接退出），
