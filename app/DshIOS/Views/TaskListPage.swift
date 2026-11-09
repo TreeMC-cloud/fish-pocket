@@ -100,9 +100,7 @@ struct TaskListPage: View {
                     .foregroundStyle(Palette.faint)
             }
             HStack(spacing: 8) {
-                Text(task.deliveredOnly && task.status == "succeeded"
-                     ? String(localized: "已投递")
-                     : label(task.status))
+                Text(statusText(task))
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(tint(task.status))
                 if let err = task.lastError, !err.isEmpty {
@@ -149,6 +147,20 @@ struct TaskListPage: View {
         let loaded = await Task.detached(priority: .userInitiated) { TaskSnapshot.load() }.value
         snapshot = loaded
         loading = false
+    }
+
+    /// 投递型任务的状态要说得更准：
+    /// 「已投递」只是发出去了；知道后续结果时补上成败，不知道就老实说不知道。
+    private func statusText(_ task: TaskSnapshot.Row) -> String {
+        guard task.deliveredOnly, task.status == "succeeded" else { return label(task.status) }
+        guard let outcome = task.turnOutcome else { return String(localized: "已投递 · 结果未知") }
+        switch outcome {
+        case "completed": return String(localized: "已投递 · 完成")
+        case "error", "failed": return String(localized: "已投递 · 失败")
+        case "aborted", "interrupted": return String(localized: "已投递 · 中断")
+        case "max-tokens": return String(localized: "已投递 · 到输出上限")
+        default: return String(localized: "已投递 · \(outcome)")
+        }
     }
 
     private func label(_ status: String) -> String {
@@ -204,6 +216,9 @@ struct TaskSnapshot {
         /// 只是「消息投进去了」，真正的成败在那一轮对话里。
         /// 不区分的话，一轮失败之后表里仍写着「已完成」，账本就不可信了。
         let deliveredOnly: Bool
+        /// 投递之后那一轮的真实结果（`completed` / `error` / `aborted`…）。
+        /// nil 表示「还没跑完」或「不是投递型任务」——不猜。
+        let turnOutcome: String?
     }
 
     let tasks: [Row]
@@ -230,7 +245,8 @@ struct TaskSnapshot {
                 status: (dict["status"] as? String) ?? "unknown",
                 updatedAt: (dict["updatedAt"] as? Double) ?? (dict["createdAt"] as? Double) ?? 0,
                 lastError: dict["lastError"] as? String,
-                deliveredOnly: (dict["deliveredOnly"] as? Bool) ?? false
+                deliveredOnly: (dict["deliveredOnly"] as? Bool) ?? false,
+                turnOutcome: dict["turnOutcome"] as? String
             )
         }
         // 新的排前面：用户关心的是「刚才发生了什么」，不是最早的记录。
