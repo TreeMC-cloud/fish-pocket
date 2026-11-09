@@ -110,6 +110,7 @@ export class Router {
       threadKey: event.threadKey ?? null,
       note: event.note ?? null,
       acceptance: event.acceptance ?? null,
+      verify: event.verify ?? null,
       approval: verdict.action === 'await_approval' ? 'pending' : 'none',
     }, this.now());
 
