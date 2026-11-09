@@ -350,6 +350,9 @@ final class Diagnostics {
     /// 而且这个类全程 @MainActor，不存在线程竞争。
     private static let stampFormatter = ISO8601DateFormatter()
 
+    /// App 日志的串行写队列：顺序不变，主线程不被磁盘 IO 拖住。
+    private static let logQueue = DispatchQueue(label: "cc.imsai.sigma.diagnostics.applog")
+
     /// 设备标识：只用于在服务器上区分是哪台机器，不是广告标识，
     /// 取系统给 App 的 identifierForVendor，卸载重装会变——对开发期足够了。
     private var deviceId: String {
@@ -402,6 +405,18 @@ final class Diagnostics {
         line += "\n"
         guard let data = line.data(using: .utf8) else { return }
         let url = appLogFile
+        // 写盘挪到串行队列。
+        //
+        // 每轮对话要记十几条（用户/模型/工具/轮次），而这些都跑在主线程上：
+        // 同步写文件会让输入和滚动卡顿。串行队列保证顺序不变，
+        // 而「日志晚几十毫秒落盘」对排查没有任何影响。
+        Self.logQueue.async {
+            Self.append(data, to: url)
+        }
+    }
+
+    /// 真正写盘的部分（在 `logQueue` 上跑）。
+    private static func append(_ data: Data, to url: URL) {
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
                                                  withIntermediateDirectories: true)
         // 按 2 MB 轮转。现在每条对话都记，不设上限的话几个月后会变成几十 MB，
