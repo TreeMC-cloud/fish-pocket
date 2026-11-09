@@ -88,13 +88,26 @@
 - 续期函数存在且有测试：`router.mjs:396-404`；但**全仓（排除测试）没有任何地方调用它**——本次核实 `rg '\.heartbeat\('` 结果只有 `engine/test/router.test.mjs:137,139`。
 - 巡检判据：`task-registry.mjs:342`（`expired`：`running` 且 `leaseUntil < now`）；`router.sweep()`（`:410-432`）会把这种任务转成 `interrupted` 并**发一条"心跳超时"提醒**。
 - 后果：任何一个真正跑超过 30 分钟的任务，在 15 秒调度循环里会被 sweep 抓成"中断"——明明还在跑。任务越重越容易踩。
-- 这不是"没接线就算"的问题，而是**做出了错误行为**（假中断 + 误报提醒）。修法：Worker 每完成一步调 `router.heartbeat(taskId)`，或把租约和真实心跳绑定。
+- **但这不会真的发生**，因为 `runTask` 在 `agent.inject()` 之后就返回了（`task-runner.mjs`），
+  任务活不过毫秒，根本到不了 30 分钟。心跳不续期在实践中不会造成误判。
+- 反过来说，这里有个更值得修的问题：`runTask` 返回 `{ok:true}` 只代表**消息投递成功**，
+  不代表那一轮做完了。所以任务表里的 `succeeded` 是"已投递"，不是"已完成"。
+  已加 `deliveredOnly` 标记并在 App 里如实显示"已投递"。
+- 结论：**heartbeat 不是当前需要修的东西**；真正的缺口是"任务结果与会话结果没打通"——
+  会话那一轮的成败没有回写到任务表。要做完整需要 turn/end 时按 sessionId 找到对应任务，
+  属于下一步。
 
 ### 2.（新）`Router.accept()` 没有运行时调用方 → 外部事件进不了任务队列
 
 - `router.accept()`（`router.mjs:97`）是"事件→任务"的唯一入口，含两级准入、审批（await_approval）语义，且**只在测试和 `runtime/bench.mjs:394` 里被调**（本次核实，排除测试后全仓只剩 bench——bench 自己也是手动工具）。
 - 现状：任务表里的任务只有两个来源——每轮对话（`task-tracking.onTurnStart`）和人工重排（`task-control`）。`schedule` 来源被有意挡在外面（见 §二-2），`webhook`/`agent-message`/`await_approval` 整条链在运行时**没有入口**。
-- 影响：现在它不是"跨任务协调"，是"单通道（用户对话）任务记账 + 手动重排"。外部事件接入是下一步的硬缺口。
+- **但队列不是死的**：`Router.runnable()` 直接读 `tasks.json`，任何 `queued` 状态的任务都会被调度，
+  不管是谁写进去的。实际闭环是：
+  `用户点「重排」→ task-control 把状态改成 queued → 15 秒循环拾取 → agent.inject 进会话`。
+  这条链有测试覆盖（`task-control.test.mjs` / `task-runner.test.mjs`），是通的。
+- 真正缺的是**自动任务来源**：除了人工重排，没有别的东西往队列里放任务。
+  iOS 上没有常驻的外部事件源（webhook / IM / 邮件都进不来），所以这一项目前只能是
+  "失败重试队列"，不是"自主调度器"。`approve()` 无人调用同理——没有需要审批的入口。
 - 顺带：`approve()` 全仓 0 处调用（连测试都没有）——审批通过没有消费者。
 
 ### 3.（新）Dream 落库的目录和会话读的记忆库可能不是同一个
