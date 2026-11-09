@@ -289,6 +289,8 @@ export default class AutoGuard {
   static inject = [];
 
   constructor(ctx, config = {}) {
+    /** 被截断过、模型只看到首尾的文件 → 时间戳。编辑前要拦一次。 */
+    this.truncatedFiles = new Map();
     this.ctx = ctx;
     this.turnsMax = Number(config.turnsMax ?? process.env.DSH_TURNS_MAX ?? DEFAULT_TURNS_MAX) || DEFAULT_TURNS_MAX;
     this.repeatMax = Number(config.repeatMax ?? DEFAULT_REPEAT_MAX) || DEFAULT_REPEAT_MAX;
@@ -349,7 +351,8 @@ ctx.effect(() => {
   // 每 15 秒跑一次纯属浪费。每个进程跑一次就够——它查的是「模块之间的
   // 接线通不通」，跟具体数据无关。
   //
-  // 延迟 12 秒：不和引擎启动、preload、首次会话加载抢 CPU。
+  // 延迟 5 秒：不和引擎启动、preload、首次会话加载抢 CPU；
+  // 但也不能太久——App 被系统回收得早的话，自检页会一直停在「还没跑完自测」。
   // iOS 上启动瞬间内存很紧，这时候跑自测容易被系统杀掉。
   try {
     const bootTimer = setTimeout(() => {
@@ -364,7 +367,7 @@ ctx.effect(() => {
           try { this.ctx.logger?.warn?.('[auto-guard] 自测失败: %s', error?.message ?? error); } catch { /* 无 logger */ }
         }
       })();
-    }, 12_000);
+    }, 5_000);
     try { bootTimer?.unref?.(); } catch { /* 某些宿主没有 unref */ }
   } catch { /* 自测起不来不影响调度 */ }
 
@@ -443,6 +446,12 @@ ctx.effect(() => {
       // 放在 tick 之后：先把手头的活干完，再看有没有新问题。
       try { await this.maybeProactive(router); } catch { /* 主动层坏了不影响调度 */ }
 
+      // 整理也在这里试一次。
+      // 原先只在 turn/end 触发，于是「不对话就永远不整理」——而整理恰恰是
+      // 用户不在场时最该发生的事。这里只是把「有机会就跑」扩到空闲时段，
+      // 真正的门槛（≥20 条新 trace、≥1 小时间隔）仍由 dream.shouldRun 把着。
+      try { this.maybeDream(); } catch { /* 整理失败不影响调度 */ }
+
       if (result.started.length > 0) {
         try {
           this.ctx.logger?.info?.(
@@ -509,6 +518,10 @@ ctx.effect(() => {
             const name = call?.name ?? call?.tool;
             if (!name || !DISPATCH_TOOL_PATTERN.test(name)) {
               // 非派活工具：走编辑预检（只对会改文件的工具生效）
+              // 被截断过的文件不许直接编辑：模型看到的是首尾拼接版，
+              // 中间那段它没有，old_str 要么匹配不上，要么匹配到错误位置。
+              const stale = this.staleTruncation(call);
+              if (stale) return stale;
               const blocked = this.precheckEdit(call);
               return blocked ?? next?.(call);
             }
@@ -567,6 +580,17 @@ ctx.effect(() => {
               };
             });
             if (trimmed > 0) {
+              // 记下这个文件「模型只看到首尾」。编辑前要拦一次，
+              // 否则它会拿截断版的 old_str 去匹配，改错位置或者干脆失败。
+              try {
+                const a = exec?.arguments ?? {};
+                const target = a.file_path ?? a.path ?? a.filePath ?? a.file;
+                if (typeof target === 'string' && target) {
+                  // 插件级而不是会话级：exec 上拿 session 不可靠，
+                  // 而「这个文件被截断过」这件事跨轮次都成立。
+                  this.truncatedFiles.set(target, Date.now());
+                }
+              } catch { /* 记不下就退回只靠提示 */ }
               try {
                 this.notify(`工具 ${exec?.name ?? '?'} 输出过长（${total} 字符），已截断后交给模型`,
                             { kind: 'compaction' });
@@ -883,6 +907,36 @@ ctx.effect(() => {
    *
    * @returns {string|null} 拒绝理由；null 表示放行
    */
+  /**
+   * 这个文件的内容是不是被截断过？是就返回一句可行动的拦截理由。
+   *
+   * 为什么必须拦：截断保留的是首尾，中间那段模型根本没有。
+   * 拿它去写 old_str，要么匹配不上（白跑一轮），要么匹配到同名的另一处
+   * （**改错地方**，比失败糟糕得多）。拦一次让它先精确重读，代价是一轮。
+   *
+   * 只拦一次：拦完就把标记清掉，避免模型重读之后仍然被卡住。
+   * 15 分钟后自动过期，防止一个很早的截断一直挡着。
+   */
+  staleTruncation(call) {
+    try {
+      const name = String(call?.name ?? call?.tool ?? '').split('__').pop();
+      if (!/^(edit|str_replace|str_replace_editor|apply_patch)$/i.test(name)) return null;
+      const args = call?.args ?? call?.input ?? call?.arguments;
+      if (!args) return null;
+      const file = args.file_path ?? args.path ?? args.filePath ?? args.file;
+      if (typeof file !== 'string' || !file) return null;
+      const at = this.truncatedFiles.get(file);
+      if (!at) return null;
+      if (Date.now() - at > 15 * 60_000) { this.truncatedFiles.delete(file); return null; }
+      this.truncatedFiles.delete(file);      // 只拦一次
+      return `你之前看到的 ${file} 是**截断版**（只保留首尾，中间省略了）。` +
+             '直接按它编辑可能匹配到错误位置。先用 read 加上行范围（或用 grep 定位到具体几行）' +
+             '精确读一次，确认要改的原文，再编辑。';
+    } catch {
+      return null;
+    }
+  }
+
   precheckEdit(call) {
     try {
       const name = String(call?.name ?? call?.tool ?? '').split('__').pop();
