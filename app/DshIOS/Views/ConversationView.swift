@@ -129,7 +129,9 @@ struct ConversationView: View {
                 // 引擎重启打断了上一次任务：在时间线顶上挂一条，说清楚发生了什么。
                 // 放在滚动区外：它不该滚走，用户得先看见这个才明白为什么没有回答。
                 if let notice = model.interruptedNotice {
-                    InterruptedBanner(text: notice) {
+                    InterruptedBanner(text: notice, retry: {
+                        Task { await model.resumeInterruptedTurn() }
+                    }) {
                         withAnimation(.snappy(duration: 0.2)) { model.dismissInterruptedNotice() }
                     }
                 }
@@ -889,6 +891,9 @@ private struct TimelineRow: View, Equatable {
 /// 一条自己编的事件，下次同步就会对不上。横幅是纯客户端状态，关掉就没了。
 private struct InterruptedBanner: View {
     let text: String
+    /// 从断点接着做。中断最常见的处理不是「关掉」，是「继续」——
+    /// 只给一个叉号等于逼用户自己把原话再打一遍。
+    var retry: (() -> Void)?
     let dismiss: () -> Void
 
     var body: some View {
@@ -906,6 +911,12 @@ private struct InterruptedBanner: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 4)
+            if let retry {
+                Button("继续", action: retry)
+                    .font(.caption.weight(.semibold))
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Palette.running)
+            }
             Button(action: dismiss) {
                 Image(systemName: "xmark")
                     .font(.caption2.weight(.bold))
