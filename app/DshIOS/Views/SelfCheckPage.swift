@@ -11,6 +11,8 @@ import SwiftUI
 struct SelfCheckPage: View {
     @State private var result: SelfCheckResult?
     @State private var running = false
+    /// 引擎启动后自己跑的那一轮端到端自测（selftest.json）。
+    @State private var selftest: SelfTestResult?
 
     var body: some View {
         Form {
@@ -53,6 +55,39 @@ struct SelfCheckPage: View {
             .groupedRow()
 
             Section {
+                if let selftest {
+                    ForEach(selftest.items) { item in
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: item.ok ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                .foregroundStyle(item.ok ? Palette.running : Palette.removed)
+                                .font(.caption)
+                                .padding(.top, 2)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(item.title).foregroundStyle(Palette.ink)
+                                Text(item.detail)
+                                    .font(.caption)
+                                    .foregroundStyle(Palette.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                } else {
+                    Text("引擎还没跑完自测（启动后约 12 秒）")
+                        .foregroundStyle(Palette.secondary)
+                }
+            } header: {
+                if let selftest {
+                    Text("链路自测 \(selftest.passed)/\(selftest.total)")
+                } else {
+                    Text("链路自测")
+                }
+            } footer: {
+                Text("上面那组查「引擎这轮有没有真的干活」；这一组查「模块之间的接线通不通」——在临时目录里真跑一遍任务、候选技能、身份更新和通知准入，不碰你的数据。")
+            }
+            .groupedRow()
+
+            Section {
                 Button("开始检查") { run() }
                     .disabled(running)
             } footer: {
@@ -67,7 +102,18 @@ struct SelfCheckPage: View {
         .groupedList()
         .navigationTitle("引擎自检")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { if result == nil { run() } }
+        .onAppear {
+            if result == nil { run() }
+            loadSelfTest()
+        }
+    }
+
+    /// 读引擎写下的自测结果。没有文件就是还没跑（启动后约 12 秒才会写）。
+    private func loadSelfTest() {
+        let url = EnginePaths.real(EnginePaths.shared + "/selftest.json")
+        guard let data = try? Data(contentsOf: url),
+              let parsed = SelfTestResult(json: data) else { return }
+        selftest = parsed
     }
 
     private func run() {
@@ -97,6 +143,35 @@ struct SelfCheckResult {
     var failed: Int { items.count - passed }
     var headline: String {
         failed == 0 ? "全部就绪（\(passed)/\(items.count)）" : "\(failed) 项未就绪（\(passed)/\(items.count)）"
+    }
+}
+
+/// 引擎自测的结果（`selftest.json`）。
+struct SelfTestResult {
+    struct Item: Identifiable {
+        let id: String
+        let title: String
+        let detail: String
+        let ok: Bool
+    }
+    var items: [Item] = []
+    var passed: Int = 0
+    var total: Int = 0
+
+    init?(json: Data) {
+        guard let obj = try? JSONSerialization.jsonObject(with: json) as? [String: Any],
+              let rows = obj["items"] as? [[String: Any]] else { return nil }
+        items = rows.compactMap { row in
+            guard let id = row["id"] as? String else { return nil }
+            return Item(
+                id: id,
+                title: row["title"] as? String ?? id,
+                detail: row["detail"] as? String ?? "",
+                ok: row["ok"] as? Bool ?? false
+            )
+        }
+        passed = obj["passed"] as? Int ?? items.filter(\.ok).count
+        total = obj["total"] as? Int ?? items.count
     }
 }
 
