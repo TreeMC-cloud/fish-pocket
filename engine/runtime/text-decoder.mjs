@@ -1,10 +1,27 @@
-// nodejs-mobile is built with small-icu, which carries no legacy encodings:
-// `new TextDecoder('gbk')` throws ERR_ENCODING_NOT_SUPPORTED, while on any
-// official Node build it is a standard call. Plugins written for desktop make
-// it, some of them while their module loads, so the plugin then fails to
-// import, or falls back to UTF-8 and garbles the text. GBK and GB18030 are
-// decoded here in JavaScript on such builds; every other label stays native.
-// The tables load on first use.
+// ⚠️ 这个模块**当前没有被接线**，而且**依赖缺失**。接上之前先读这段。
+//
+// 它想解决的问题是真的：nodejs-mobile 用 small-icu 构建，不带遗留编码，
+// `new TextDecoder('gbk')` 会抛 ERR_ENCODING_NOT_SUPPORTED；而桌面版 Node
+// 是标准调用。为桌面写的插件会在 import 期就调用它，于是插件加载失败，
+// 或者退回 UTF-8 把中文解成乱码。
+//
+// 但它实现不下去了：decode 时要 `require('iconv-lite')`，
+// 而这个包在 engine/package.json、仓库、构建产物里**都不存在**。
+// 现在调用 `installTextDecoder()` 的后果是：检测到原生不支持 GBK → 替换全局
+// TextDecoder → 真正解码时抛 MODULE_NOT_FOUND。比不替换更糟
+// （原生至少抛的是清晰的 ERR_ENCODING_NOT_SUPPORTED）。
+//
+// 所以它目前是**未接线的半成品**，留着是为了不丢掉这段分析和实现骨架。
+// 要真正启用，需要三步：
+//   1. 把 iconv-lite 加进 engine/package.json 的 dependencies，确认它能进包
+//   2. 在 boot.mjs 里 import 并调用 installTextDecoder()（跟 installSegmenter
+//      放在一起，那两个是同一类 iOS 适配）
+//   3. 补一个测试：在 small-icu 环境下 `new TextDecoder('gbk')` 能正确解出中文
+//
+// 在此之前，中文文本在引擎侧按 UTF-8 走；GBK 输入会失败——这是已知限制。
+//
+// 实现原文如下（GBK/GB18030 在 JavaScript 里解码；其余标签走原生；
+// 码表首次使用时才加载）：
 import { createRequire, syncBuiltinESMExports } from 'node:module';
 import util from 'node:util';
 
