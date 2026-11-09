@@ -363,23 +363,34 @@ ctx.effect(() => {
       // 顺带记一笔 schedule 的观察结果（只读，不接管投递）。
       // buildStatus 是同步的，读不到 ctx.get('schedule') 这种异步服务，
       // 所以由这里落一个文件给它读——和 in-flight.json 同一个模式。
-      try {
-        const svc = ctx.get?.('schedule');
-        if (svc && typeof svc.catalog === 'function') {
-          const entries = await svc.catalog();
-          const bridge = requireScheduleBridge();
-          const now = Date.now();
-          const rows = (Array.isArray(entries) ? entries : []).map((e) => ({
-            ...bridge.summarize(e),
-            due: bridge.isDue(e, now),
-          }));
-          fs.writeFileSync(
-            path.join(this.dataDir(), 'schedule-view.json'),
-            JSON.stringify({ at: now, total: rows.length, rows: rows.slice(0, 50) }),
-            { mode: 0o600 },
-          );
+      {
+        // 无论能不能读到定时任务，都要落这个文件。
+        // 原来只在 `ctx.get('schedule')` 拿得到时才写，于是「文件不存在」
+        // 有两种完全不同的可能：插件没跑，或者 schedule 服务不可用——
+        // 而自检只能看到「不存在」，没法区分。把不可用的原因也写进去，
+        // 这个文件才是一个可靠的探针。
+        const now = Date.now();
+        let payload;
+        try {
+          const svc = ctx.get?.('schedule');
+          if (svc && typeof svc.catalog === 'function') {
+            const entries = await svc.catalog();
+            const bridge = requireScheduleBridge();
+            const rows = (Array.isArray(entries) ? entries : []).map((e) => ({
+              ...bridge.summarize(e),
+              due: bridge.isDue(e, now),
+            }));
+            payload = { at: now, ok: true, total: rows.length, rows: rows.slice(0, 50) };
+          } else {
+            payload = { at: now, ok: false, reason: 'ctx.get("schedule") 不可用', total: 0, rows: [] };
+          }
+        } catch (error) {
+          payload = { at: now, ok: false, reason: String(error?.message ?? error).slice(0, 200), total: 0, rows: [] };
         }
-      } catch { /* schedule 不可用不影响调度 */ }
+        try {
+          fs.writeFileSync(path.join(this.dataDir(), 'schedule-view.json'), JSON.stringify(payload), { mode: 0o600 });
+        } catch { /* 写不了就算了，不影响调度 */ }
+      }
 
       // 先处理人工确认请求（App 落的文件）：
       // 用户点了「重排」，这一步把它变成 queued，紧接着的 tick 就会跑它。
@@ -473,6 +484,53 @@ ctx.effect(() => {
         } catch {
           // 管线事件不存在：只保留会话事件那一套，功能降级但不崩。
         }
+
+        // 上下文闸门：一次工具输出就能吃掉几万 token，而它会被**每一轮**重新读。
+        //
+        // 为什么要在 post-execute 改：这里能拿到工具结果本身，也能返回
+        // `{kind:'accept', content}` 替换它（dsh-tools pipeline 的契约）。
+        // 放到别处改不了，只能看着上下文涨。
+        //
+        // 阈值怎么定的：
+        //   - 40k 字符 ≈ 15k token，已经是单次工具输出里罕见的大值；
+        //   - 保留首尾各 1/3——命令输出通常开头是命令/头部、结尾是结论/错误；
+        //   - 中间明确写「已截断 + 原长度 + 怎么拿全量」，让模型知道可以重跑取局部。
+        try {
+          ctx.on('tools/post-execute', (exec, result) => {
+            const limit = 40000;
+            const content = result?.content;
+            if (!Array.isArray(content)) return { kind: 'accept' };
+            let total = 0;
+            for (const block of content) {
+              if (block?.type === 'text' && typeof block.text === 'string') total += block.text.length;
+            }
+            if (total <= limit) return { kind: 'accept' };
+
+            const perBlock = Math.max(2000, Math.floor(limit / Math.max(1, content.length)));
+            let trimmed = 0;
+            const next = content.map((block) => {
+              if (block?.type !== 'text' || typeof block.text !== 'string') return block;
+              if (block.text.length <= perBlock) return block;
+              const head = block.text.slice(0, Math.floor(perBlock * 2 / 3));
+              const tail = block.text.slice(-Math.floor(perBlock / 3));
+              trimmed += 1;
+              return {
+                ...block,
+                text: `${head}\n\n…（输出过长已截断：原文 ${block.text.length} 字符，` +
+                      `保留首尾。需要中间部分请用更精确的命令重取，例如 grep/head/tail 限定范围）…\n\n${tail}`,
+              };
+            });
+            if (trimmed > 0) {
+              try {
+                this.notify(`工具 ${exec?.name ?? '?'} 输出过长（${total} 字符），已截断后交给模型`,
+                            { kind: 'compaction' });
+              } catch { /* 提醒失败不影响结果 */ }
+            }
+            return { kind: 'accept', content: next };
+          });
+        } catch {
+          // 没有这个钩子就退化成不裁剪：宁可费 token，也不能让工具结果送不回去。
+        }
       }
 
       return () => offs.forEach((off) => off?.());
@@ -483,7 +541,10 @@ ctx.effect(() => {
     let s = this.state.get(session);
     if (!s) {
       s = { turns: 0, warnedTurn: false, warnedCompact: false,
-            lastTool: null, repeat: 0, warnedRepeat: false, warnedMem: false };
+            lastTool: null, repeat: 0, warnedRepeat: false, warnedMem: false,
+            // 本轮加载过哪些技能。记下来是为了在 turn/end 时配上**真实结果**——
+            // 只在加载时记一笔的话，成功率永远是「未知」，降级规则拿不到输入。
+            skillsThisTurn: [] };
       this.state.set(session, s);
     }
     return s;
@@ -916,6 +977,22 @@ ctx.effect(() => {
       // 记忆插件自己发的内省轮次不算工作，记进来会污染统计。
       if (String(session?.header?.origin ?? '') === 'subagent') return;
 
+      // 技能效果：本轮加载过的技能，配上这一轮的真实结果。
+      //   completed → 成功（ok=true）
+      //   其余（error / aborted / max-tokens …）→ 失败（ok=false）
+      // 这是 skill-stats 从「只知加载过几次」变成「知道有没有用」的关键一步：
+      // 没有它，失败率永远算不出来，`degrade` 那套自动降级等于没有输入。
+      if (Array.isArray(s.skillsThisTurn) && s.skillsThisTurn.length > 0) {
+        try {
+          const { record } = requireSkillStats();
+          const ok = reason === 'completed';
+          for (const skillName of s.skillsThisTurn) {
+            record(skillName, ok, { dataDir: this.dataDir() });
+          }
+        } catch { /* 记账失败不影响对话 */ }
+        s.skillsThisTurn = [];
+      }
+
       // 任务收尾：按 turn/end 的真实原因转终态。
       // 必须在 writeStatus **之前**——快照统计的是任务表，
       // 先刷快照再改状态，面板永远显示上一轮的样子。
@@ -1188,8 +1265,10 @@ ctx.effect(() => {
           ? (JSON.parse(args)?.name ?? null)
           : (args?.name ?? null);
         if (typeof skillName === 'string' && skillName) {
-          const { record } = requireSkillStats();
-          record(skillName, null, { dataDir: this.dataDir() });
+          // 只记下名字，**不在这里记账**：这里的 ok 只能是 null（未知），
+          // 等于永远不知道技能有没有用。等到 turn/end 拿到真实结果再一次性记，
+          // 一次加载 = 一条记录，不会重复计数。
+          if (!s.skillsThisTurn.includes(skillName)) s.skillsThisTurn.push(skillName);
         }
       } catch { /* 记账失败不影响工具结果 */ }
     }
