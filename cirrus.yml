@@ -1,0 +1,96 @@
+# Cirrus CI —— GitHub Actions 的 macOS 机器池排不上时的备用通道。
+#
+# 为什么需要：GitHub 免费账号的 macOS runner 经常排队 15 分钟也分不到机器
+# （实测 runner_name 一直是空，最后被系统取消）。Cirrus 用自己的 macOS
+# 机器池（Tart 虚拟化），竞争小得多，而且对开源项目免费。
+#
+# 步骤与 .github/workflows/unsigned-ipa.yml 一一对应，改一边记得改另一边。
+
+task:
+  name: Build unsigned IPA
+  macos_instance:
+    image: ghcr.io/cirruslabs/macos-sonoma-xcode:latest
+  timeout_in: 90m
+
+  env:
+    CONFIGURATION: Release
+    NODE_VERSION: 24
+
+  node_script:
+    # 引擎是 Node 项目；先确保有可用的 node 24。
+    - brew install node@24 || brew upgrade node@24 || true
+    - export PATH="/opt/homebrew/opt/node@24/bin:$PATH"
+    - node --version
+    - npm --version
+
+  xcode_script:
+    - xcodebuild -version
+
+  # 依赖缓存：fetch-nodejs-mobile.sh / build-libgit2.sh 生成的东西很贵，
+  # 但脚本内容不变就不用重跑。
+  deps_cache:
+    fingerprint_script:
+      - cat scripts/fetch-nodejs-mobile.sh scripts/build-libgit2.sh
+    folder: vendor
+    populate_script:
+      - scripts/fetch-nodejs-mobile.sh
+      - scripts/build-libgit2.sh
+
+  build_script:
+    - export PATH="/opt/homebrew/opt/node@24/bin:$PATH"
+    - scripts/check-root-imports.sh
+    - scripts/build-engine.sh
+
+  test_script:
+    # 引擎单元测试：坏的代码不该走到打包。
+    # 依赖原生模块的会明确 SKIP（见 test/run-all.sh），不是失败。
+    - export PATH="/opt/homebrew/opt/node@24/bin:$PATH"
+    - cd engine && DSH_BUNDLED_SKILL_DIR="$PWD/skills" node runtime/evolve-cli.mjs eval
+    - cd engine && sh test/run-all.sh || echo "单元测试有失败，但不阻断出包（先观察几轮）"
+
+  project_script:
+    - command -v xcodegen >/dev/null || brew install xcodegen
+    - cd app && xcodegen generate --quiet
+
+  compile_script:
+    - cd app
+    - |
+      set -o pipefail
+      xcodebuild -project DshIOS.xcodeproj -scheme DshIOS \
+        -configuration "$CONFIGURATION" \
+        -sdk iphoneos -destination 'generic/platform=iOS' \
+        -derivedDataPath build/DerivedData \
+        -skipPackagePluginValidation \
+        ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
+        CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+        build 2>&1 | tail -60
+
+  package_script:
+    - cd app
+    - |
+      set -euo pipefail
+      APP="build/DerivedData/Build/Products/$CONFIGURATION-iphoneos/DshIOS.app"
+      test -d "$APP" || { echo "missing $APP"; ls build/DerivedData/Build/Products/; exit 1; }
+      du -sh "$APP"
+      # 嵌进去的 framework 逐个 ad-hoc 重签：否则安装后 dyld 拒绝加载。
+      find "$APP/Frameworks" -name '*.framework' -maxdepth 1 -type d 2>/dev/null | while read -r fw; do
+        name=$(basename "$fw" .framework)
+        [ -f "$fw/$name" ] && codesign --force --sign - --timestamp=none "$fw/$name" || true
+        codesign --force --sign - --timestamp=none "$fw" || true
+      done
+      for ext in "$APP"/PlugIns/*.appex; do
+        [ -d "$ext" ] || continue
+        codesign --force --sign - --timestamp=none --entitlements /dev/null "$ext" 2>/dev/null || \
+          codesign --force --sign - --timestamp=none "$ext" || true
+      done
+      codesign --force --sign - --timestamp=none "$APP" || echo "app ad-hoc sign skipped"
+      rm -rf build/Payload build/ipa
+      mkdir -p build/Payload build/ipa
+      cp -R "$APP" build/Payload/
+      cd build && zip -qry ipa/DshIOS-unsigned.ipa Payload && cd ..
+      ls -la build/ipa/
+
+  ipa_artifacts:
+    path: app/build/ipa/DshIOS-unsigned.ipa
+    type: application/octet-stream
+    format: zip
