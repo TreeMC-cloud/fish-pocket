@@ -20,10 +20,10 @@ test('自测在干净仓库上全部通过', async () => {
   assert.equal(r.passed, r.total);
 });
 
-test('覆盖到五个关键链路，一个都不能少', async () => {
+test('覆盖到六个关键链路，一个都不能少', async () => {
   const r = await runSelfTest();
   const ids = r.items.map((i) => i.id).sort();
-  assert.deepEqual(ids, ['candidates', 'dispatch', 'identity', 'notices', 'tasks']);
+  assert.deepEqual(ids, ['candidates', 'dispatch', 'identity', 'notices', 'proactive', 'tasks']);
 });
 
 test('writeSelfTest 落盘，且能被读回来', async () => {
