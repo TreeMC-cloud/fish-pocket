@@ -7,6 +7,42 @@ import SwiftUI
 /// 也和旁边的「插件／自动化」属于同一类：这些东西在替我做什么。
 ///
 /// 页面分两段：
+/// 用量（`capability.json` 的 `cost` 段，由引擎聚合 `usage.jsonl`）。
+struct UsageCost {
+    let todayIn: String
+    let todayOut: String
+    let totalIn: String
+    let totalOut: String
+    let turns: Int
+
+    static func load() -> UsageCost? {
+        let url = EnginePaths.real(EnginePaths.shared + "/capability.json")
+        guard let data = try? Data(contentsOf: url),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let cost = obj["cost"] as? [String: Any],
+              (cost["ok"] as? Bool) == true,
+              let today = cost["today"] as? [String: Any],
+              let total = cost["total"] as? [String: Any] else { return nil }
+        let turns = total["turns"] as? Int ?? 0
+        guard turns > 0 else { return nil }
+        return UsageCost(
+            todayIn: shorten(num(today["input"]) + num(today["cacheRead"])),
+            todayOut: shorten(num(today["output"])),
+            totalIn: shorten(num(total["input"]) + num(total["cacheRead"])),
+            totalOut: shorten(num(total["output"])),
+            turns: turns
+        )
+    }
+
+    private static func num(_ v: Any?) -> Int { (v as? Int) ?? Int((v as? Double) ?? 0) }
+    /// 12345 → 12.3k，和引擎侧 fmt 同口径。
+    private static func shorten(_ n: Int) -> String {
+        if n < 1000 { return "\(n)" }
+        if n < 1_000_000 { return String(format: "%.1fk", Double(n) / 1000) }
+        return String(format: "%.2fM", Double(n) / 1_000_000)
+    }
+}
+
 /// 当前计划（`plan-view.json`，由 auto-guard 在 turn/start 从工作区 `.plan.md` 读出）。
 struct PlanProgress {
     let total: Int
@@ -35,6 +71,28 @@ struct CapabilityPage: View {
 
     var body: some View {
         Form {
+            if let cost = UsageCost.load() {
+                Section {
+                    HStack {
+                        Text("今日").foregroundStyle(Palette.ink)
+                        Spacer()
+                        Text("\(cost.todayIn) 进 · \(cost.todayOut) 出")
+                            .foregroundStyle(Palette.secondary)
+                    }
+                    HStack {
+                        Text("累计").foregroundStyle(Palette.ink)
+                        Spacer()
+                        Text("\(cost.totalIn) 进 · \(cost.totalOut) 出 · \(cost.turns) 轮")
+                            .foregroundStyle(Palette.secondary)
+                    }
+                } header: {
+                    Text("用量")
+                } footer: {
+                    Text("按 token 计，\"进\" 含缓存读取。单价随模型/供应商不同，这里不换算成钱——换算出来的数字容易误导。")
+                }
+                .groupedRow()
+            }
+
             if let plan = PlanProgress.load() {
                 Section {
                     VStack(alignment: .leading, spacing: 6) {
