@@ -351,7 +351,7 @@ final class Diagnostics {
     private static let stampFormatter = ISO8601DateFormatter()
 
     /// App 日志的串行写队列：顺序不变，主线程不被磁盘 IO 拖住。
-    private static let logQueue = DispatchQueue(label: "cc.imsai.sigma.diagnostics.applog")
+    nonisolated private static let logQueue = DispatchQueue(label: "cc.imsai.sigma.diagnostics.applog")
 
     /// 设备标识：只用于在服务器上区分是哪台机器，不是广告标识，
     /// 取系统给 App 的 identifierForVendor，卸载重装会变——对开发期足够了。
@@ -415,8 +415,15 @@ final class Diagnostics {
         }
     }
 
+    /// 往任意文件追加一行（串行队列，不阻塞主线程）。
+    /// 给 usage.jsonl 这类「App 写、引擎读」的文件用。
+    nonisolated static func appendLine(_ line: String, to url: URL) {
+        guard let data = (line + "\n").data(using: .utf8) else { return }
+        logQueue.async { append(data, to: url) }
+    }
+
     /// 真正写盘的部分（在 `logQueue` 上跑）。
-    private static func append(_ data: Data, to url: URL) {
+    nonisolated private static func append(_ data: Data, to url: URL) {
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
                                                  withIntermediateDirectories: true)
         // 按 2 MB 轮转。现在每条对话都记，不设上限的话几个月后会变成几十 MB，
