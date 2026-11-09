@@ -2,6 +2,9 @@ import ImageIO
 import PDFKit
 import QuickLook
 import SwiftUI
+// UIApplication / UIActivityViewController 来自 UIKit；
+// SwiftUI 会间接带进来，但显式导入更稳（分享按钮要用）。
+import UIKit
 import WebKit
 
 /// One directory of the session workspace (the workbench 文件 tab): folders
@@ -251,6 +254,7 @@ struct FileContentView: View {
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .top, spacing: 0) { banner }
         .toolbar {
+            ToolbarItem(placement: .topBarTrailing) { shareButton }
             ToolbarItem(placement: .topBarTrailing) { actions }
         }
         .quickLookPreview($preview)
@@ -278,6 +282,47 @@ struct FileContentView: View {
         }
     }
 
+    /// 分享按钮必须**独立于 Menu**。
+    ///
+    /// 原来它写在 `Menu { ... ShareLink(item: localURL) }` 里，点了没反应：
+    /// Menu 的项是独立浮层，SwiftUI 在这个上下文里启动分享面板会失败——
+    /// 菜单关掉了，面板没出来，用户看到的就是「点了没用」。
+    /// 系统分享面板需要从真实的视图控制器 present，所以这里自己找顶层 VC。
+    private var shareButton: some View {
+        Button {
+            Haptics.tap()
+            shareFile()
+        } label: {
+            Image(systemName: "square.and.arrow.up")
+        }
+        .accessibilityLabel("分享")
+        // 没有可分享的文件时明确禁用，而不是点了没反应。
+        .disabled(localURL == nil)
+    }
+
+    /// 分享当前文件。找不到文件时**说清楚**，不要静默。
+    private func shareFile() {
+        guard let url = localURL else {
+            app.showToast(String(localized: "文件还没准备好，暂时无法分享"), duration: 4)
+            return
+        }
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            app.showToast(String(localized: "文件不存在，可能已被移动或删除"), duration: 5)
+            return
+        }
+        let scene = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first { $0.activationState == .foregroundActive }
+        guard let window = scene?.keyWindow, var top = window.rootViewController else { return }
+        while let presented = top.presentedViewController, !presented.isBeingDismissed { top = presented }
+        let controller = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+        // iPad 上是 popover，必须给锚点，否则会崩或者不显示。
+        controller.popoverPresentationController?.sourceView = window
+        controller.popoverPresentationController?.sourceRect = CGRect(
+            x: window.bounds.midX, y: window.bounds.minY + 60, width: 0, height: 0)
+        top.present(controller, animated: true)
+    }
+
     private var actions: some View {
         Menu {
             if renderers.count > 1 {
@@ -292,7 +337,9 @@ struct FileContentView: View {
             if let localURL {
                 Button { copyToPasteboard(localURL.path) } label: { Label("复制路径", systemImage: "doc.on.doc") }
                 Button { preview = localURL } label: { Label("快速查看", systemImage: "eye") }
-                ShareLink(item: localURL)
+                // 不用 ShareLink：它在这个 Menu 里点不动（见 shareButton 的注释）。
+                // 走同一个 shareFile()，行为一致。
+                Button { shareFile() } label: { Label("分享", systemImage: "square.and.arrow.up") }
             }
         } label: {
             Image(systemName: "ellipsis")
@@ -317,7 +364,7 @@ struct FileContentView: View {
         } actions: {
             if let localURL {
                 Button("用快速查看打开") { preview = localURL }
-                ShareLink(item: localURL)
+                Button("分享") { shareFile() }
             }
         }
     }
