@@ -149,3 +149,52 @@ test('控制目录不存在时不抛异常', () => {
   assert.doesNotThrow(() => ctl.drain(router, d));
   assert.equal(ctl.drain(router, d).handled, 0);
 });
+
+// ── 投递新任务（自主任务源的入口）─────────────────────
+
+test('enqueue：外部能把活放进队列，正文完整带到 agent', async () => {
+  const d = tmp();
+  const injected = [];
+  const router = new Router({
+    dataDir: d,
+    runTask: async (task) => { injected.push(task); return { ok: true }; },
+  });
+
+  const out = ctl.handle(router, {
+    action: 'enqueue', sessionId: 'S1', eventId: 'src-1',
+    text: '把 README 的章节按依赖关系重排，先给方案再动手',
+  });
+  assert.equal(out.ok, true);
+  assert.equal(out.created, true);
+
+  const task = Object.values(router.state().tasks)[0];
+  assert.equal(task.threadKey, 'S1', '要知道投给哪个会话');
+  assert.equal(task.note, '把 README 的章节按依赖关系重排，先给方案再动手',
+    '正文要完整保留，不能只剩 200 字的 title');
+  assert.equal(task.source, 'external');
+});
+
+test('enqueue：同一 eventId 投两次只建一个任务', async () => {
+  const d = tmp();
+  const router = new Router({ dataDir: d, runTask: async () => ({ ok: true }) });
+  ctl.handle(router, { action: 'enqueue', sessionId: 'S1', eventId: 'same', text: '一件事' });
+  const second = ctl.handle(router, { action: 'enqueue', sessionId: 'S1', eventId: 'same', text: '一件事' });
+  assert.equal(second.created, false);
+  assert.equal(Object.keys(router.state().tasks).length, 1);
+});
+
+test('enqueue：缺 sessionId 或正文时明确拒绝，不建半截任务', async () => {
+  const d = tmp();
+  const router = new Router({ dataDir: d, runTask: async () => ({ ok: true }) });
+  assert.equal(ctl.handle(router, { action: 'enqueue', text: '没有会话' }).ok, false);
+  assert.equal(ctl.handle(router, { action: 'enqueue', sessionId: 'S1' }).ok, false);
+  assert.equal(Object.keys(router.state().tasks).length, 0);
+});
+
+test('enqueue：正文超过 4000 字被截断（防止把整个文件塞进任务表）', async () => {
+  const d = tmp();
+  const router = new Router({ dataDir: d, runTask: async () => ({ ok: true }) });
+  ctl.handle(router, { action: 'enqueue', sessionId: 'S1', eventId: 'long', text: 'x'.repeat(9000) });
+  const task = Object.values(router.state().tasks)[0];
+  assert.equal(task.note.length, 4000);
+});
