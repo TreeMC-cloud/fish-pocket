@@ -38,8 +38,16 @@ import { fileURLToPath } from 'node:url';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DATA = process.env.DSH_IOS_DATA || process.cwd();
 const SKILLS = process.env.DSH_BUNDLED_SKILL_DIR || path.resolve(HERE, '..');
+// 文件名必须和 `trace.mjs` 的 distill 写出的那个一致：`.skill-candidates.jsonl`。
+//
+// 这里原来写的是 `.evolved-candidates.jsonl`——两个模块各用一个名字，
+// 结果 distill 明明产出了候选，`promote list` 却永远显示「还没有候选技能」，
+// 整条进化闭环（trace → 提炼 → 提升为技能）在最后一步断掉，
+// 而且不报错：两个文件都合法，只是谁也看不见谁。
+//
+// 这类「两边各写一份约定」已经是本项目的高频 bug，统一成一个常量名。
 const CAND_FILE = process.env.DSH_CANDIDATES_FILE
-  || path.join(DATA, '.evolved-candidates.jsonl');
+  || path.join(DATA, '.skill-candidates.jsonl');
 
 function readCandidates() {
   try {
