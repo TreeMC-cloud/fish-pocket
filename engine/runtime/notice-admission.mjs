@@ -22,6 +22,11 @@ const ALWAYS = new Set([
   'interrupted',
   'injection',
   'task_failed',
+  // Router 另外两种「任务出事」的口吻：交付校验没过、连续同因失败要求重新拆解。
+  // 它们和 task_failed 同一性质（用户要做决定），漏掉的代价不是少一条日志：
+  // auto-guard 会先把事件 ack 掉，再在这里被拦下 —— 事件从两头都不见了。
+  'gate_failed',
+  'task_needs_redesign',
   'task_interrupted',
   'approval_needed',
 ]);
