@@ -50,10 +50,17 @@ for f in test/*.test.mjs; do
   rc=0
   out=$(node --test-timeout=120000 "$f" 2>&1) || rc=$?
 
-  # 原生模块缺失：明确跳过，不算失败
-  if echo "$out" | grep -q "ERR_MODULE_NOT_FOUND\|Cannot find module\|Cannot find package"; then
-    skipped="$skipped $name"
-    continue
+  # 原生模块缺失：明确跳过，不算失败。
+  #
+  # 只认这几个**只有真机才有的原生绑定**（nodejs-mobile / libgit2 / sharp）。
+  # 不能见 "Cannot find module" 就跳过：那样任何一个真 bug（少写 import、
+  # 文件被删）都会被当成"环境不支持"静默略过——正是这个脚本要防的事。
+  # CI 上曾因此多出 4 个假 SKIP（ios-host / memory-integration / text-decoder）。
+  if echo "$out" | grep -qE "nodejs-mobile|libgit2|/sharp|sharp\.node"; then
+    if echo "$out" | grep -q "Cannot find module\|Cannot find package\|ERR_MODULE_NOT_FOUND"; then
+      skipped="$skipped $name"
+      continue
+    fi
   fi
 
   p=$(echo "$out" | grep -E "^# pass" | awk '{print $3}')
