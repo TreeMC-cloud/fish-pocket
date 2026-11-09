@@ -200,6 +200,14 @@ function requireSceneSchema() {
   return globalThis.__sceneSchemaMod;
 }
 
+function requirePlan() {
+  if (!globalThis.__planMod) {
+    const req = createRequire(import.meta.url);
+    globalThis.__planMod = req('../../runtime/plan.mjs');
+  }
+  return globalThis.__planMod;
+}
+
 function requireProactive() {
   if (!globalThis.__proactiveMod) {
     const req = createRequire(import.meta.url);
@@ -695,6 +703,20 @@ ctx.effect(() => {
     try {
       if (String(session?.header?.origin ?? '') !== 'subagent') {
         this.lastSessionId = sessionId(session);
+
+      // 计划进度：读工作区里的 .plan.md，落一份给 App 看。
+      // 读失败 / 没有文件都正常（多数任务不需要计划文件），不记日志。
+      try {
+        const mod = requirePlan();
+        const cwd = session?.header?.cwd ?? null;
+        const plan = mod.readPlan(cwd);
+        this.planProgress = mod.describeProgress(plan);
+        fs.writeFileSync(
+          path.join(this.dataDir(), 'plan-view.json'),
+          JSON.stringify(mod.toView(plan, { cwd }), null, 0),
+          { mode: 0o600 },
+        );
+      } catch { /* 计划是可选的，读不到不影响对话 */ }
       }
     } catch { /* 记不下就算了 */ }
     const s = this.runtime(session);
