@@ -22,6 +22,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import {
+  deriveCandidates, appendCandidates, fingerprintOf,
+  MIN_SAMPLES, MIN_FAIL_RATIO, WINDOW,
+} from '../../runtime/candidates.mjs';
+
+// 候选文件的路径、指纹算法、够格判据都在 runtime/candidates.mjs 里，
+// 这边只做 CLI 外壳。此前这两份是各写一份，Dream 自动整理时
+// 算的是一套、手动 distill 算的是另一套，一旦分叉就静默失效。
+export { fingerprintOf };
 
 const DATA = process.env.DSH_IOS_DATA || process.cwd();
 const TRACE_FILE = process.env.DSH_TRACE_FILE || path.join(DATA, '.trace.jsonl');
@@ -97,9 +106,6 @@ function cmdRecord(argv) {
  * 提炼出来的只是「候选」，verified 一律 false。要不要变成真技能，得有人（或
  * 之后一轮自审）看过、确认它对，再来改 flag。这是故意的减速带。
  */
-const MIN_SAMPLES = 3;
-const MIN_FAIL_RATIO = 0.3;
-const WINDOW = 300;
 
 function cmdDistill(argv) {
   const dryRun = argv.includes('--dry-run');
@@ -111,41 +117,9 @@ function cmdDistill(argv) {
     return 0;
   }
 
-  // 按 tag 聚合：一个 tag 就是一个「话题」，成功的和失败的分开数。
-  const groups = new Map();
-  for (const t of traces) {
-    for (const tag of t.tags ?? []) {
-      const g = groups.get(tag) ?? { tag, total: 0, fails: 0, okSamples: [], failSamples: [] };
-      g.total += 1;
-      if (t.ok === false) {
-        g.fails += 1;
-        if (g.failSamples.length < 3) g.failSamples.push(t.summary);
-      } else if (t.ok === true) {
-        if (g.okSamples.length < 3) g.okSamples.push(t.summary);
-      }
-      groups.set(tag, g);
-    }
-  }
-
-  const candidates = [];
-  for (const g of groups.values()) {
-    if (g.total < MIN_SAMPLES) continue;
-    const ratio = g.fails / g.total;
-    if (ratio < MIN_FAIL_RATIO) continue;      // 一路顺利的话题不需要技能
-    if (g.okSamples.length === 0) continue;    // 从没成功过 = 还没解法，别急着固化成技能
-    candidates.push({
-      at: now(),
-      tag: g.tag,
-      samples: g.total,
-      fails: g.fails,
-      failRatio: Number(ratio.toFixed(2)),
-      /** 坑 */
-      problem: clip(g.failSamples[0] ?? '', 200),
-      /** 现有解法 */
-      practice: clip(g.okSamples[0] ?? '', 200),
-      verified: false,
-    });
-  }
+  // 聚类与判据都在 candidates.mjs：Dream 自动整理调的是同一份，
+  // 两处口径分叉正是这个项目反复踩的坑。
+  const candidates = deriveCandidates(traces, { now: now() });
 
   if (candidates.length === 0) {
     console.log(`扫了 ${traces.length} 条 trace，没有够格提炼的话题。`);
@@ -159,45 +133,12 @@ function cmdDistill(argv) {
     return 0;
   }
 
-  const existing = new Set(readJsonl(CAND_FILE).flatMap((c) => (c.fingerprint ? [c.tag, c.fingerprint] : [c.tag])));
-  let added = 0;
-  let skipped = 0;
-  for (const c of candidates) {
-    // 指纹由「话题 + 失败模式」算出：同样的证据产出同一条指纹。
-    // 只用 tag 去重不够——同一个话题在不同阶段会踩不同的坑，
-    // 按 tag 挡掉会漏掉新问题；而不挡又会把同一件事反复堆进候选表。
-    c.fingerprint = fingerprintOf(c);
-    if (existing.has(c.tag) || existing.has(c.fingerprint)) { skipped += 1; continue; }
-    appendJsonl(CAND_FILE, c);
-    existing.add(c.fingerprint);
-    added += 1;
-  }
+  const { added, skipped } = appendCandidates(DATA, candidates, { now: now() });
   console.log(`✓ 产出 ${added} 条候选技能（共 ${candidates.length} 条够格，${skipped} 条已存在）`);
   console.log('注意：候选的 verified 都是 false，看过确认后再手动置 true 才会被当成真技能。');
   return 0;
 }
 
-/**
- * 候选的稳定指纹：话题 + 归一化后的失败描述。
- *
- * 归一化只做「去标点、去空白、小写」——不能做得更聪明（比如取关键词），
- * 因为那会让不同的坑算出同一指纹，反而把新问题挡掉。
- * 目标是「同一次证据重跑得到同一个指纹」，不是「语义相似也算同一条」。
- */
-export function fingerprintOf(candidate) {
-  const normalize = (s) => String(s ?? '')
-    .toLowerCase()
-    .replace(/[\s\p{P}\p{S}]+/gu, '')
-    .slice(0, 120);
-  const raw = `${candidate.tag ?? ''}|${normalize(candidate.problem)}`;
-  // 短哈希足够：候选表是小文件，不需要抗碰撞；但要稳定（不依赖时间/随机）。
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < raw.length; i += 1) {
-    hash ^= raw.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193) >>> 0;
-  }
-  return `fp${hash.toString(16).padStart(8, '0')}`;
-}
 
 // ── list ──────────────────────────────────────────────────────────────
 
