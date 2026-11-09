@@ -42,8 +42,15 @@ final class Diagnostics {
     /// 「TLS 错误，无法建立安全连接」——ATS 与自签证书的组合在 URLSession 里
     /// 并不可靠地允许委托层接管。为一个开发期的日志通道继续和它搏斗不值得。
     ///
-    /// 安全性怎么保证：App 已开 `NSAllowsArbitraryLoads`（远程工作台需要），
-    /// 明文 HTTP 可用；通道本身用 Bearer token 鉴权，且只发日志、不接受指令。
+    /// ATS 靠什么放行：**`project.yml` 里给 `202.189.51.44` 单开的
+    /// `NSExceptionDomains` + `NSExceptionAllowsInsecureHTTPLoads`**，
+    /// 不是 `NSAllowsArbitraryLoads`。后者一旦和 `NSAllowsLocalNetworking` /
+    /// `NSAllowsArbitraryLoadsInWebContent` 同时出现，iOS 10+ 就按默认值 NO
+    /// 处理（Apple 的 ATS 版本兼容规则），而那两个键又分别是引擎
+    /// （127.0.0.1）和内置浏览器必需的，删不得。按域名（这里是 IP）的例外
+    /// 优先于所有全局键，也只影响这一个地址——这正是我们想要的粒度。
+    ///
+    /// 通道本身用 Bearer token 鉴权，且只发日志、不接受指令。
     /// 真要上生产，正确做法是给服务器配正式证书、把这里和 ATS 一起收紧。
     static let defaultEndpoint = "http://202.189.51.44:8790/sigma/log"
     static let defaultToken = "XslsS4QGTmZAI1ep_xdS6WpVm-5iqF_G"
@@ -83,6 +90,9 @@ final class Diagnostics {
     /// 一个后台循环就够了：读增量 → 发 → 睡。并发发送没有必要，
     /// 反而会让服务器上的行序错乱（追加写的顺序就是到达顺序）。
     private var loop: Task<Void, Never>?
+    /// 正在「自动换协议」时置位：`endpoint` 的 didSet 看到它就不 restart()。
+    /// 理由见 `adopt(_:after:)`——那一批刚发成功，重启循环只会把本轮打断。
+    private var switchingScheme = false
     /// 真机崩溃的根因：原来用 `URLSessionConfiguration.background` 建会话，
     /// 而 `data(for:)` 在后台会话上不受支持，App 一打开上报就崩。
     /// 后台会话是给「退后台后继续传文件」用的；这里每 20 秒一轮、断网等下轮，
@@ -165,6 +175,44 @@ final class Diagnostics {
         guard enabled, let url = uploadURL else { return }
         guard let batch = readNewLog() else { return }
 
+        do {
+            try await send(batch, to: url)
+            commit(batch)
+        } catch {
+            let first = error
+            // 只在**协议不同**、且这次失败是「这条路根本走不通」时才换一次。
+            // 一次失败最多换一次协议，换完还失败就等下轮（20 秒后）——绝不在这里循环重试，
+            // 否则服务器整个挂掉时会把 App 变成一台重试机器。
+            guard Self.isTransportFailure(first), let fallback = Self.flippedScheme(url) else {
+                fail(first)
+                return
+            }
+            do {
+                try await send(batch, to: fallback)
+                commit(batch)
+                adopt(fallback, after: first)
+            } catch {
+                // 两条协议都不通：两条的错误都留下，否则只看到后一条，
+                // 分不清「本来就没网」还是「换过去才坏的」。
+                fail(NSError(domain: "Diagnostics", code: 2, userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "\(Self.describe(first))；换到 \(fallback.scheme ?? "?") 后仍失败：\(Self.describe(error))"
+                ]))
+            }
+        }
+    }
+
+    /// 一批待上报的内容：数据 + 读完之后的两个游标。
+    /// 游标**不在这里提交**，要等请求成功——先提交再发送的话，一次网络抖动就永久丢日志。
+    private struct Batch {
+        let data: Data
+        let engineCursor: UInt64
+        let appCursor: UInt64
+    }
+
+    /// 发一批到指定地址。HTTP 非 2xx 也算失败：服务器没落盘就不能提交游标，
+    /// 否则这批日志永久消失，而界面上还显示「成功」。
+    private func send(_ batch: Batch, to url: URL) async throws {
         var request = URLRequest(url: url)
         request.httpMethod = "PUT"
         request.setValue("text/plain; charset=utf-8", forHTTPHeaderField: "Content-Type")
@@ -176,25 +224,77 @@ final class Diagnostics {
         if !token.isEmpty { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         request.httpBody = batch.data
 
-        do {
-            let (_, response) = try await session.data(for: request)
-            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-                throw NSError(domain: "Diagnostics", code: 1,
-                              userInfo: [NSLocalizedDescriptionKey: "服务器返回 \(((response as? HTTPURLResponse)?.statusCode).map(String.init) ?? "?")"])
-            }
-            // 只有发成功才提交游标：否则下次启动会漏掉这段日志。
-            cursor = batch.engineCursor
-            defaults.set(Int(cursor), forKey: Keys.cursor)
-            appCursorRef = batch.appCursor
-            sentBatches += 1
-            defaults.set(sentBatches, forKey: Keys.sentBatches)
-            lastPushAt = Date()
-            defaults.set(lastPushAt, forKey: Keys.lastPush)
-            if lastError != nil { lastError = nil; defaults.removeObject(forKey: Keys.lastError) }
-        } catch {
-            lastError = error.localizedDescription
-            defaults.set(lastError, forKey: Keys.lastError)
+        let (_, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw NSError(domain: "Diagnostics", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: "服务器返回 \(((response as? HTTPURLResponse)?.statusCode).map(String.init) ?? "?")"])
         }
+    }
+
+    /// 提交游标并记账。**只有**请求成功后才调用。
+    private func commit(_ batch: Batch) {
+        cursor = batch.engineCursor
+        defaults.set(Int(cursor), forKey: Keys.cursor)
+        appCursorRef = batch.appCursor
+        sentBatches += 1
+        defaults.set(sentBatches, forKey: Keys.sentBatches)
+        lastPushAt = Date()
+        defaults.set(lastPushAt, forKey: Keys.lastPush)
+        if lastError != nil { lastError = nil; defaults.removeObject(forKey: Keys.lastError) }
+    }
+
+    /// 记一次失败。带上 NSError 的 domain + code：
+    /// ATS 拦掉的请求是 `NSURLErrorDomain -1022`，光看「无法建立安全连接」
+    /// 这类本地化文案分不清是证书、DNS 还是 ATS，有了码一眼就能确认。
+    private func fail(_ error: Error) {
+        lastError = Self.describe(error)
+        defaults.set(lastError, forKey: Keys.lastError)
+    }
+
+    private static func describe(_ error: Error) -> String {
+        let ns = error as NSError
+        return "\(ns.localizedDescription)（\(ns.domain) \(ns.code)）"
+    }
+
+    /// 值得换协议再试吗？
+    ///
+    /// 只有**传输层**失败才换：ATS 拦截（-1022）、连不上（-1004）、
+    /// TLS 握手失败（-1200 系列）、超时（-1001）都属于「这条协议这条路走不通」。
+    /// 服务器已经回了状态码（401/500，domain 是 "Diagnostics"）则不换——
+    /// 地址本身是通的，换协议只会把一个能用的地址改成不能用的，
+    /// 还会把「token 配错了」伪装成网络问题。
+    /// 被取消（-999，改设置/退出时循环被 cancel）也不换，那是我们自己的动作。
+    private static func isTransportFailure(_ error: Error) -> Bool {
+        let ns = error as NSError
+        guard ns.domain == NSURLErrorDomain else { return false }
+        return ns.code != NSURLErrorCancelled
+    }
+
+    /// 同 host/port/path，只把 http ↔ https 换一下；别的协议一律返回 nil（不猜）。
+    private static func flippedScheme(_ url: URL) -> URL? {
+        let target: String
+        switch url.scheme?.lowercased() {
+        case "http": target = "https"
+        case "https": target = "http"
+        default: return nil
+        }
+        // 用 URLComponents 而不是字符串替换：端口、路径、查询串原样保留，
+        // 也不会把路径里恰好出现的 "http" 误伤。
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
+        components.scheme = target
+        return components.url
+    }
+
+    /// 换协议成功：把新地址持久化，下次启动直接用，不再先撞一次墙。
+    private func adopt(_ url: URL, after failure: Error) {
+        // 置位期间 endpoint 的 didSet 只写 UserDefaults、不重启循环：
+        // restart() 会 cancel 掉正在跑的这个 loop，而这一批刚发成功、游标刚提交，
+        // 重启只会白等 3 秒。下一轮读到的已经是新地址。
+        switchingScheme = true
+        endpoint = url.absoluteString
+        switchingScheme = false
+        lastError = "已自动换到 \(url.scheme ?? "?")://（原地址失败：\(Self.describe(failure))）"
+        defaults.set(lastError, forKey: Keys.lastError)
     }
 
     /// App 事件文件的读位置。
