@@ -127,7 +127,41 @@ export function onTurnEnd(dataDir, { sessionId, turn, reasonKind, error }, now =
     return null;
   }
   try { registry.save(state, dataDir); } catch { /* 同上 */ }
-  return { taskId, status: to };
+
+  // 顺手把「投递型」任务的真实结果补上。
+  // Router 的任务在 agent.inject() 后就标 succeeded 了——那只代表消息投进去了。
+  // 这一轮真实跑完的成败，只有 turn/end 知道。不回写的话，任务表永远停在
+  // 「已投递」，会话失败它也显示正常，账本就不可信了。
+  const reconciled = reconcileDelivered(state, { sessionId, reasonKind, now });
+  if (reconciled > 0) {
+    try { registry.save(state, dataDir); } catch { /* 尽力而为 */ }
+  }
+  return { taskId, status: to, reconciled };
+}
+
+/**
+ * 把同一会话里、最近投递过、还没拿到结果的任务补上 `turnOutcome`。
+ *
+ * 为什么用「最近 N 分钟内 + 同一会话」而不是精确配对：注入时机在 turn 开始之前，
+ * 那时还没有 turn 号。能做到的可靠关联只有会话 + 时间窗。多个命中时取最新的那个
+ * （同会话同一时间只会有一轮在跑）。
+ *
+ * 刻意**不改 status**：succeeded 是终态，状态机的 TRANSITIONS 不允许回退，
+ * 而且"投递成功"本身也是事实。所以只加一个 `turnOutcome` 字段表示后续结果。
+ */
+export function reconcileDelivered(state, { sessionId, reasonKind, now = Date.now(), windowMs = 30 * 60_000 } = {}) {
+  if (!sessionId) return 0;
+  let count = 0;
+  for (const task of Object.values(state.tasks ?? {})) {
+    if (task?.deliveredOnly !== true) continue;
+    if (task.threadKey !== sessionId) continue;
+    if (task.turnOutcome !== undefined && task.turnOutcome !== null) continue;  // 已经配过
+    if (now - (task.updatedAt ?? 0) > windowMs) continue;                       // 太久，可能不是这一轮
+    task.turnOutcome = reasonKind ?? 'unknown';
+    task.turnAt = now;
+    count += 1;
+  }
+  return count;
 }
 
 /** 只读统计，给 capability-status 用（避免它自己解析任务文件格式）。 */
