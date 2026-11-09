@@ -90,6 +90,20 @@ const env = {
   TMPDIR: dirs.TMPDIR,
   // The first-use workspace goes under this directory (see ios.patch.yml).
   DSH_IOS_DOCUMENTS: process.env.DSH_IOS_DOCUMENTS ?? path.join(data, 'documents'),
+  // 默认工作区。**必须设**，否则后台整理（Dream）会把经验写进一个没人读的库。
+  //
+  // memory-store 的 workspaceFromEnv() 回落链是
+  //   DSH_IOS_WORKSPACE → DSH_WORKSPACE → DSH_IOS_DATA → cwd
+  // 而会话是按 `session.header.cwd`（用户实际的工作区）定位记忆库的。
+  // 两个都没设时，Dream 落到 `$DSH_IOS_DATA/.dsh-meow`，会话读
+  // `<工作区>/.dsh-meow` —— 整理「成功」了，但一条都用不上，且不报错。
+  //
+  // 与 ios.patch.yml 里 workspace-controller 的首次工作区保持一致。
+  // 已知限制：用户开了多个工作区时，Dream 只写默认这一个。
+  // 那比「写进谁都读不到的地方」好，也比乱猜「当前会话」稳
+  //（Dream 是定时的，可能没有活跃会话）。
+  DSH_IOS_WORKSPACE: process.env.DSH_IOS_WORKSPACE
+    ?? path.join(process.env.DSH_IOS_DOCUMENTS ?? path.join(data, 'documents'), 'deepseek-harness'),
   // Skills that ship with the app, ios-environment among them (dsh-skill-filesystem's bundled root).
   DSH_BUNDLED_SKILL_DIR: path.join(path.dirname(fileURLToPath(import.meta.url)), 'skills'),
   // 技能里的自查脚本（selfcheck / handoff / selfaudit / verify）住在只读的 app bundle 里，
