@@ -14,6 +14,7 @@
 
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { extractEntities, mergeKeywords } from './entities.mjs';
 
 /** 记忆库在该工作区下的相对目录，与 ios.patch.yml 的 projectDir 一致。 */
 export const MEMORY_DIR = '.dsh-meow';
@@ -77,8 +78,12 @@ export function createMemoryStore(workspace, { dir = MEMORY_DIR, project = null,
           level: 'lesson',
           title: `技能[${skill.key ?? (skill.tags || []).join('+')}]`,
           content: `${prefix}${skill.text}`,
-          // 关键词就是聚类用的标签，保持与 trace 同口径，检索才能对上
-          keywords: skill.tags ?? [],
+          // 关键词 = 聚类标签 + 从正文里抽出的实体。
+          //
+          // 为什么要加实体：标签回答「这件事属于哪个话题」，实体回答
+          // 「它涉及哪个文件/模块/错误码」。后者是稳定字符串，用户下次
+          // 按路径或错误码找记忆时才搜得到——只靠话题标签基本搜不中。
+          keywords: mergeKeywords(skill.tags ?? [], extractEntities(`${skill.text ?? ''} ${skill.key ?? ''}`)),
           importance: 2,              // 技能比一次性事实重要，但还没到人格级
           project: project ?? undefined,
           source_session: 'dream',
