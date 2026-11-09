@@ -35,7 +35,7 @@ function run(dir, ...args) {
 function seed(dir, rows) {
   fs.mkdirSync(path.join(dir, 'skills'), { recursive: true });
   fs.writeFileSync(
-    path.join(dir, '.evolved-candidates.jsonl'),
+    path.join(dir, '.skill-candidates.jsonl'),
     rows.map((r) => JSON.stringify(r)).join('\n') + '\n',
   );
 }
@@ -119,8 +119,8 @@ test('reject 丢弃候选并留备份', () => {
   seed(d, [CAND]);
   const r = run(d, 'reject', 'b1');
   assert.equal(r.code, 0);
-  assert.ok(fs.existsSync(path.join(d, '.evolved-candidates.jsonl.bak')), '必须留备份');
-  assert.equal(fs.readFileSync(path.join(d, '.evolved-candidates.jsonl'), 'utf8').trim(), '');
+  assert.ok(fs.existsSync(path.join(d, '.skill-candidates.jsonl.bak')), '必须留备份');
+  assert.equal(fs.readFileSync(path.join(d, '.skill-candidates.jsonl'), 'utf8').trim(), '');
 });
 
 test('找不到编号时报错而不是静默成功', () => {
@@ -135,4 +135,27 @@ test('未知命令给出用法并以非零退出', () => {
   const r = run(tmp(), 'bogus');
   assert.equal(r.code, 2);
   assert.match(r.out, /用法/);
+});
+
+test('distill 写出的候选文件，promote 必须能读到（跨模块文件名一致）', async () => {
+  // 这条守的是一个真实踩过的坑：trace.mjs 写 .skill-candidates.jsonl，
+  // 而 promote.mjs 读 .evolved-candidates.jsonl——两个名字不一样，
+  // distill 明明产出了候选，promote list 却永远显示「还没有候选技能」，
+  // 整条进化闭环在最后一步断掉，而且**不报错**（两个文件都合法，只是谁也看不见谁）。
+  //
+  // 断言方式刻意不写死文件名：从两个模块的源码里各抽出候选文件名的字面量，
+  // 直接比对。这样以后谁改了其中一个，测试立刻红。
+  const { readFileSync } = await import('node:fs');
+  const here = new URL('.', import.meta.url);
+  const traceSrc = readFileSync(new URL('../skills/evolve/trace.mjs', here), 'utf8');
+  const promoteSrc = readFileSync(new URL('../skills/evolve/promote.mjs', here), 'utf8');
+  const nameOf = (src) => {
+    const m = src.match(/'(\.[a-z-]*candidates\.jsonl)'/);
+    return m ? m[1] : null;
+  };
+  const a = nameOf(traceSrc);
+  const b = nameOf(promoteSrc);
+  assert.ok(a, 'trace.mjs 里应该能找到候选文件名');
+  assert.ok(b, 'promote.mjs 里应该能找到候选文件名');
+  assert.equal(a, b, `两个模块的候选文件名必须一致，现在分别是 ${a} 和 ${b}`);
 });
