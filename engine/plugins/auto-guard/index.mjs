@@ -1192,6 +1192,22 @@ ctx.effect(() => {
             acceptance: this.lastAcceptance ?? null,
           });
           this.lastAcceptance = null;
+
+          // 独立验证：跑任务声明的命令，用退出码说话。
+          // 放在 acceptance 之后：模型自述先落，引擎判定再覆盖——
+          // 冲突时以退出码为准（见 recordVerification 的注释）。
+          try {
+            const v = requireTaskTracking().recordVerification(this.dataDir(), {
+              sessionId: sessionId(session),
+              cwd: session?.header?.cwd ?? null,
+            });
+            if (v.ran && v.ok === false) {
+              this.notify(
+                `任务验证没过：${v.results.find((r) => r.ok === false)?.cmd ?? ''}`,
+                { kind: 'task_failed', session: sessionId(session) },
+              );
+            }
+          } catch { /* 验证跑不了不影响对话 */ }
         } catch { /* 记账是副产物 */ }
       }
 
