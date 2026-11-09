@@ -7,6 +7,27 @@ import SwiftUI
 /// 也和旁边的「插件／自动化」属于同一类：这些东西在替我做什么。
 ///
 /// 页面分两段：
+/// 当前计划（`plan-view.json`，由 auto-guard 在 turn/start 从工作区 `.plan.md` 读出）。
+struct PlanProgress {
+    let total: Int
+    let done: Int
+    let next: String?
+
+    static func load() -> PlanProgress? {
+        let url = EnginePaths.real(EnginePaths.shared + "/plan-view.json")
+        guard let data = try? Data(contentsOf: url),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              (obj["ok"] as? Bool) == true else { return nil }
+        let total = obj["total"] as? Int ?? 0
+        guard total > 0 else { return nil }
+        return PlanProgress(
+            total: total,
+            done: obj["done"] as? Int ?? 0,
+            next: (obj["next"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        )
+    }
+}
+
 /// 1. 运行状态（`CapabilityPanel`，数据来自引擎写的 capability.json）
 /// 2. 这层到底比原生 DSH 多了什么（静态说明，回答「我到底装了个啥」）
 struct CapabilityPage: View {
@@ -14,6 +35,38 @@ struct CapabilityPage: View {
 
     var body: some View {
         Form {
+            if let plan = PlanProgress.load() {
+                Section {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text("计划进度 \(plan.done)/\(plan.total)")
+                                .foregroundStyle(Palette.ink)
+                            Spacer()
+                            if plan.total > 0 {
+                                ProgressView(value: Double(plan.done), total: Double(plan.total))
+                                    .frame(width: 90)
+                            }
+                        }
+                        if let next = plan.next {
+                            Text("下一步：\(next)")
+                                .font(.caption)
+                                .foregroundStyle(Palette.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        } else {
+                            Text("全部完成")
+                                .font(.caption)
+                                .foregroundStyle(Palette.running)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                } header: {
+                    Text("当前计划")
+                } footer: {
+                    Text("来自工作区的 .plan.md。多步骤任务会让它把计划写进文件，压缩上下文或中途重启都能接上。")
+                }
+                .groupedRow()
+            }
+
             Section {
                 CapabilityPanel(status: app.capability, bare: true)
                     .padding(.vertical, 4)
