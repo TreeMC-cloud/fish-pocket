@@ -175,6 +175,7 @@ final class SessionModel {
             // 一个新的真实 turn 开始了：旧中断状态已经过期，正常显示这次执行。
             if event["type"].string == "turn/start" { clearInterruptedState() }
             events.append(event)
+            logEvent(event)
             if timeline.apply(event) { publishTimeline() } else { publishTimelineState() }
             // Only a live turn end prompts for quota or support; history replays never do.
             if event["type"].string == "turn/end" {
@@ -274,6 +275,66 @@ final class SessionModel {
         liveAttempt = nil
         livePartials = [:]
         if !live.isEmpty { live = [] }
+    }
+
+    // MARK: Diagnostics log
+
+    /// 把一轮对话的骨架记进诊断日志：用户说什么、模型回什么、调了哪些工具、
+    /// 每轮怎么结束。**不记 token 流、不记完整工具输出**——那会让日志按 MB 涨，
+    /// 而排查问题需要的只是「发生了什么、按什么顺序」。
+    ///
+    /// 为什么连对话正文也要记：这是之后改进 agent 的唯一原始素材。
+    /// 只记「第几轮成功/失败」看不出它为什么绕远路、哪里啰嗦、哪种问法会跑偏。
+    private func logEvent(_ event: JSON) {
+        let type = event["type"].string ?? ""
+        let data = event["data"]
+        switch type {
+        case "user/message":
+            // 注意层级：user/message 的 content 在 data 顶层（`data["content"]`），
+            // assistant/message 才在 `data["message"]["content"]`。写成同一层会静默记空。
+            let text = joinedText(data["content"])
+            if !text.isEmpty { Diagnostics.shared.record("用户", Diagnostics.clip(text)) }
+        case "assistant/message":
+            let content = data["message"]["content"]
+            let text = joinedText(content)
+            if !text.isEmpty { Diagnostics.shared.record("模型", Diagnostics.clip(text)) }
+            // 工具调用藏在 assistant 消息的 content 里（type == "tool-call"），
+            // 不是独立事件——只在 tool/result 上记的话，日志里会出现「工具完成」
+            // 却从来没有「调用了什么」。
+            for part in content.array where part["type"].string == "tool-call" {
+                let name = part["name"].string ?? "tool"
+                let args = part["arguments"].string ?? ""
+                Diagnostics.shared.record("调用工具", "\(name) \(Diagnostics.clip(args, limit: 300))")
+            }
+        case "tool/result":
+            let isError = data["message"]["isError"].bool ?? data["isError"].bool ?? false
+            let code = data["error"]["code"].string
+            let text = joinedText(data["message"]["content"])
+            var detail = code ?? "ok"
+            if !text.isEmpty { detail += " · " + Diagnostics.clip(text, limit: 300) }
+            Diagnostics.shared.record(isError ? "工具失败" : "工具完成", detail)
+        case "turn/start":
+            if let turn = data["turn"].int { Diagnostics.shared.record("轮次开始", "#\(turn)") }
+        case "turn/end":
+            let kind = data["reason"]["kind"].string ?? "?"
+            let code = data["reason"]["error"]["code"].string
+            Diagnostics.shared.record("轮次结束", code.map { "\(kind) · \($0)" } ?? kind)
+        case "llm/retry":
+            let provider = data["provider"].string ?? "?"
+            let retry = data["retry"].int ?? 0
+            Diagnostics.shared.record("模型重试", "\(provider) · 第 \(retry) 次")
+        case "compaction/end":
+            Diagnostics.shared.record("上下文压缩完成")
+        default:
+            break
+        }
+    }
+
+    /// 事件内容里所有 text 片段拼起来（工具调用等非文本块跳过）。
+    private func joinedText(_ content: JSON) -> String {
+        content.array.compactMap { $0["type"].string == "text" ? $0["text"].string : nil }
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     // MARK: Timeline
@@ -383,7 +444,15 @@ final class SessionModel {
         turnOutline = values["turnOutline"].array.compactMap(TurnOutline.init)
         let selection = values["modelSelection"]["next"].isNull ? values["modelSelection"]["lastUsed"] : values["modelSelection"]["next"]
         if let provider = selection["provider"].string, let model = selection["model"].string {
+            let previous = modelSelection
             modelSelection = (provider, model, selection["reasoningEffort"].string)
+            // 只在**变化时**记一次：投影每 3 秒刷一次，每次都记会把日志刷爆。
+            // 这也是「当前用的是哪个模型」最可靠的一处来源。
+            if previous?.provider != provider || previous?.model != model {
+                var detail = "\(provider)/\(model)"
+                if let effort = selection["reasoningEffort"].string { detail += " · \(effort)" }
+                Diagnostics.shared.record("当前模型", detail)
+            }
         }
         permission = values["permissions"]["currentValue"].string ?? permission
         let usage = values["tokenUsage"]
@@ -412,6 +481,11 @@ final class SessionModel {
         var content: [JSON] = images.map { ["type": "image", "mediaType": .string($0.mediaType), "data": .string($0.data), "name": .string($0.name)] }
         if !outgoing.isEmpty { content.append(["type": "text", "text": .string(outgoing)]) }
         guard !content.isEmpty else { return }
+        // 只记动作本身（是否插话、带了几张图）。正文由 logEvent 在
+        // `user/message` 持久化事件里记——这里再记一遍就是同一条日志写两次。
+        var sendDetail = steer ? "插话" : "排队"
+        if !images.isEmpty { sendDetail += " · \(images.count) 张图片" }
+        Diagnostics.shared.record("发送", sendDetail)
         // 用户亲手发的消息：这才是「新的一轮」，允许再次自动换模型。
         // 必须在 prompt 之前清，自动重试走的是 prompt 而非 send，不会把自己清掉。
         autoSwitchedThisTurn = false
@@ -669,6 +743,7 @@ final class SessionModel {
         catch { return false }
         // 不能往 items 里 append：items 是 timeline.items 的投影，下一帧就被覆盖。
         // 用 toast 说明换了哪个模型，用户才知道后面的回答不是原来那个模型给的。
+        Diagnostics.shared.record("自动换模型", "\(alt.provider)/\(alt.model)")
         app.showToast(String(localized: "当前模型无法使用，已自动切换到 \(alt.name) 重试"), duration: 5)
         await send(text: last.text)
         // send 会把标记清成 false（它是「用户亲手发消息」的入口，这里复用了它），
@@ -703,6 +778,7 @@ final class SessionModel {
         var request: [String: JSON] = ["sessionId": .string(sessionId), "provider": .string(provider), "model": .string(model)]
         if let effort { request["reasoningEffort"] = .string(effort) }
         try await client.call("session/selectModel", ["request": .object(request)])
+        Diagnostics.shared.record("切换模型", "\(provider)/\(model)")
         modelSelection = (provider, model, effort)
         refreshProjections()
     }
