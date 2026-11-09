@@ -100,9 +100,44 @@ test('gc 只清已 ack 且超过保留期的', () => {
   ack(state, old.eventId, 1000);
   ack(state, fresh.eventId, 90_000);
 
-  const removed = gc(state, { now: 100_000, keepMs: 50_000 });
-  assert.equal(removed, 1);
+  // 返回值在加了任务回收之后从数字变成了 { outbox, tasks } 两个计数。
+  // 这里断言 outbox 那部分，另外补一条「任务回收」的测试（见下一个用例）。
+  const reclaimed = gc(state, { now: 100_000, keepMs: 50_000 });
+  assert.equal(reclaimed.outbox, 1);
   assert.deepEqual(state.outbox.map((e) => e.message), ['fresh'], '未过期的要留着');
+});
+
+test('gc 回收过期终态任务，但保留失败待处理的和新任务', () => {
+  const dir = tmp();
+  let state = load(dir);
+  const now = 10_000_000;
+  const old = now - 25 * 3600_000;   // 超过 24 小时保留期
+
+  // 一个很久以前成功的：该被回收
+  const done = create(state, { source: 'u', eventId: 'done', title: '旧成功' });
+  state = done.state;
+  for (const to of ['queued', 'running', 'succeeded']) transition(state, done.task.taskId, to);
+  state.tasks[done.task.taskId].updatedAt = old;
+
+  // 一个很久以前失败、等人处理的：必须留着——那是用户还要做的事
+  const failed = create(state, { source: 'u', eventId: 'fail', title: '旧失败' });
+  state = failed.state;
+  for (const to of ['queued', 'running', 'failed', 'needs_reconciliation']) transition(state, failed.task.taskId, to);
+  state.tasks[failed.task.taskId].updatedAt = old;
+
+  // 一个刚成功的：必须留着
+  const fresh = create(state, { source: 'u', eventId: 'fresh', title: '新成功' });
+  state = fresh.state;
+  for (const to of ['queued', 'running', 'succeeded']) transition(state, fresh.task.taskId, to);
+  state.tasks[fresh.task.taskId].updatedAt = now;
+
+  const reclaimed = gc(state, { now });
+  assert.equal(reclaimed.tasks, 1, '只该回收那一个过期终态任务');
+  assert.ok(!state.tasks[done.task.taskId], '过期成功任务应被删');
+  assert.ok(state.tasks[failed.task.taskId], '失败待处理的任务不能删');
+  assert.ok(state.tasks[fresh.task.taskId], '新任务不能删');
+  // 幂等键要跟着一起清，否则同一条事件再来会被当成已处理
+  assert.ok(!state.idempotency['u:done'], '被回收任务的幂等键也要清掉');
 });
 
 test('ack 不存在的 id 返回 false，重复 ack 幂等', () => {
