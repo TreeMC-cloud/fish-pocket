@@ -306,7 +306,9 @@ final class Diagnostics {
     /// 拼出这一批内容：引擎日志增量 + App 事件增量。
     /// 返回数据与「读完后的游标」，但**不提交**——提交要在请求成功之后。
     /// 先提交再发送的话，一次网络抖动就永久丢掉那段日志。
-    private func readNewLog() -> (data: Data, engineCursor: UInt64, appCursor: UInt64)? {
+    /// 返回 `Batch` 而不是元组：`send` / `commit` 收的是 Batch，
+    /// 早先这里写元组，调用处类型对不上，编译直接失败。
+    private func readNewLog() -> Batch? {
         var out = Data()
         var ec = cursor
         var ac = appCursorRef
@@ -316,7 +318,7 @@ final class Diagnostics {
             out.append(app)
         }
         guard !out.isEmpty else { return nil }
-        return (out, ec, ac)
+        return Batch(data: out, engineCursor: ec, appCursor: ac)
     }
 
     /// 从某个文件的游标读到末尾，最多 256 KB。游标通过 inout 推进。
