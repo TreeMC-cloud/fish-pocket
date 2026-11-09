@@ -100,7 +100,9 @@ struct TaskListPage: View {
                     .foregroundStyle(Palette.faint)
             }
             HStack(spacing: 8) {
-                Text(label(task.status))
+                Text(task.deliveredOnly && task.status == "succeeded"
+                     ? String(localized: "已投递")
+                     : label(task.status))
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(tint(task.status))
                 if let err = task.lastError, !err.isEmpty {
@@ -156,7 +158,7 @@ struct TaskListPage: View {
         case "queued": return String(localized: "排队中")
         case "received": return String(localized: "已接收")
         case "awaiting_approval": return String(localized: "等授权")
-        case "succeeded": return String(localized: "已完成")
+        case "succeeded": return String(localized: "已完成（已投递）")
         case "failed": return String(localized: "失败")
         case "interrupted": return String(localized: "中断")
         case "cancelled": return String(localized: "已取消")
@@ -199,6 +201,9 @@ struct TaskSnapshot {
         let status: String
         let updatedAt: Double
         let lastError: String?
+        /// 只是「消息投进去了」，真正的成败在那一轮对话里。
+        /// 不区分的话，一轮失败之后表里仍写着「已完成」，账本就不可信了。
+        let deliveredOnly: Bool
     }
 
     let tasks: [Row]
@@ -224,7 +229,8 @@ struct TaskSnapshot {
                 title: (dict["title"] as? String) ?? "",
                 status: (dict["status"] as? String) ?? "unknown",
                 updatedAt: (dict["updatedAt"] as? Double) ?? (dict["createdAt"] as? Double) ?? 0,
-                lastError: dict["lastError"] as? String
+                lastError: dict["lastError"] as? String,
+                deliveredOnly: (dict["deliveredOnly"] as? Bool) ?? false
             )
         }
         // 新的排前面：用户关心的是「刚才发生了什么」，不是最早的记录。
