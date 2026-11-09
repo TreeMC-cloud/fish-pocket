@@ -25,6 +25,28 @@ struct CapabilityPage: View {
             .groupedRow()
 
             Section {
+                // 任务队列的完整视图。运行状态那块只给数字和「等你确认」的短列表，
+                // 看不到全貌；出问题时需要一个能翻全部任务的地方。
+                NavigationLink {
+                    TaskListPage()
+                } label: {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("任务队列")
+                        Text(taskSummary)
+                            .font(.caption)
+                            .foregroundStyle(Palette.secondary)
+                            .lineLimit(1)
+                    }
+                    .padding(.vertical, 2)
+                }
+            } header: {
+                Text("任务")
+            } footer: {
+                Text("引擎把每轮对话记成一条任务。失败的不自动重跑，需要你在这里确认。")
+            }
+            .groupedRow()
+
+            Section {
                 ForEach(CapabilityCatalog.groups) { group in
                     NavigationLink {
                         CapabilityGroupPage(group: group)
@@ -51,6 +73,19 @@ struct CapabilityPage: View {
         // 项目统一用 GroupedListStyle（.groupedList()）：insetGrouped + 玻璃行背景 +
         // 52pt 行高下限。`.groupedListStyle()` 是 SwiftUI 在 iOS 上不存在的方法。
         .groupedList()
+    }
+
+    /// 任务队列那行右侧的摘要。
+    /// 只统计，不判断好坏——「3 个待确认」比「有异常」更能促使人点进去看。
+    private var taskSummary: String {
+        guard let stats = app.capability?.taskStats, stats.ok else {
+            return String(localized: "还没有任务记录")
+        }
+        var parts = [String(localized: "\(stats.total) 个")]
+        if !stats.needsAttention.isEmpty {
+            parts.append(String(localized: "\(stats.needsAttention.count) 个待确认"))
+        }
+        return parts.joined(separator: " · ")
     }
 }
 
