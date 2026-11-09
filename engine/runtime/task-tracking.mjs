@@ -24,6 +24,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import * as registry from './task-registry.mjs';
 
 /** turn/end 的 reason 落成任务终态。 */
@@ -183,6 +184,57 @@ export function setAcceptance(state, { sessionId, result, reason = null, now = D
     count += 1;
   }
   return count;
+}
+
+/**
+ * 引擎自己跑一遍验证命令，不信模型的自我报告。
+ *
+ * 为什么必须独立跑：模型说「ACCEPT: PASS」只代表它认为自己做到了。
+ * 这个项目见过太多次「写完文件就宣布完成」，而文件是空的、
+ * 命令退出码不是 0、测试被跳过。验收判据能变成命令的，就由引擎说话。
+ *
+ * 冲突处理：命令失败 → 强制判 fail（覆盖模型的 PASS），因为退出码是事实。
+ * 跑不起来（沙箱拒绝/命令不存在）→ 记为 null，不冤枉任务。
+ *
+ * @returns {{ran:boolean, ok?:boolean|null, results?:Array, error?:string}}
+ */
+export function recordVerification(dataDir, { sessionId, cwd = null, now = Date.now(), windowMs = 30 * 60_000 } = {}) {
+  if (!sessionId) return { ran: false, error: '没有 sessionId' };
+  let state;
+  try { state = registry.load(dataDir); } catch { return { ran: false, error: '任务表读不到' }; }
+
+  // 找「最近一条、还没验过、带验证命令」的投递型任务。
+  const candidates = Object.values(state.tasks ?? {})
+    .filter((t) => t?.deliveredOnly === true)
+    .filter((t) => t.threadKey === sessionId)
+    .filter((t) => Array.isArray(t?.verify) && t.verify.length > 0)
+    .filter((t) => t?.verifyResults == null)
+    .filter((t) => now - (t.updatedAt ?? 0) <= windowMs)
+    .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+  const task = candidates[0];
+  if (!task) return { ran: false, error: '没有待验证的任务' };
+
+  // 懒加载：child-process 那套模拟很重，别在插件初始化时就付这份成本。
+  let verdict;
+  try {
+    const require_ = createRequire(import.meta.url);
+    const mod = require_('./verify.mjs');
+    verdict = mod.verifyCommands(task.verify, { cwd: mod.resolveCwd(cwd) });
+  } catch (error) {
+    verdict = { ok: null, results: [], error: String(error?.message ?? error) };
+  }
+
+  task.verifyResults = verdict.results ?? [];
+  task.verifiedAt = now;
+  if (verdict.ok === false) {
+    // 引擎判定优先：退出码是事实，模型的 PASS 是可陈述。
+    task.acceptanceResult = 'fail';
+    task.acceptanceReason = `验证命令失败：${(verdict.results.find((r) => r.ok === false)?.cmd ?? '').slice(0, 160)}`;
+    task.acceptanceAt = now;
+  }
+  task.updatedAt = now;
+  try { registry.save(state, dataDir); } catch { /* 尽力而为 */ }
+  return { ran: true, ok: verdict.ok, results: verdict.results, taskId: task.taskId };
 }
 
 export function reconcileDelivered(state, { sessionId, reasonKind, now = Date.now(), windowMs = 30 * 60_000 } = {}) {
