@@ -93,6 +93,17 @@ targets:
         # The engine serves plain HTTP on 127.0.0.1 only.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
+          # ⚠ 不能只写 NSAllowsArbitraryLoads：Apple 明确规定，
+          # 当 NSAllowsArbitraryLoads 与 NSAllowsLocalNetworking /
+          # NSAllowsArbitraryLoadsInWebContent 同时存在时，前者在 iOS 10+ **被忽略**。
+          # 我们三者都设过，于是「允许任意加载」一直没生效，
+          # 明文 HTTP 请求仍然报 ATS 错误。
+          #
+          # 正解是给那一台服务器开精确例外——按域名（这里是 IP）放行明文。
+          NSExceptionDomains:
+            202.189.51.44:
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSIncludesSubdomains: false
           # The workbench browser previews what the agent serves, plain http included.
           NSAllowsArbitraryLoadsInWebContent: true
           # 远程工作台：客户常把工作台跑在自己的服务器上并用 http://IP:8092 连接
