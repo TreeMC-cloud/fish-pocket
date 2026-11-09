@@ -200,6 +200,14 @@ function requireSceneSchema() {
   return globalThis.__sceneSchemaMod;
 }
 
+function requireSelfTest() {
+  if (!globalThis.__selfTestMod) {
+    const req = createRequire(import.meta.url);
+    globalThis.__selfTestMod = req('../../runtime/selftest.mjs');
+  }
+  return globalThis.__selfTestMod;
+}
+
 function requireDream() {
   if (!globalThis.__dreamMods) {
     const req = createRequire(import.meta.url);
@@ -326,6 +334,31 @@ ctx.effect(() => {
     // iOS 上 setTimeout 不该拖住进程退出
     try { timer?.unref?.(); } catch { /* 某些宿主没有 unref */ }
   };
+
+  // 启动后跑一次端到端自测，结果落到 selftest.json 给 App 看。
+  //
+  // 为什么不放进调度循环：自测要开临时目录、跑 tick、写文件，属于重活，
+  // 每 15 秒跑一次纯属浪费。每个进程跑一次就够——它查的是「模块之间的
+  // 接线通不通」，跟具体数据无关。
+  //
+  // 延迟 12 秒：不和引擎启动、preload、首次会话加载抢 CPU。
+  // iOS 上启动瞬间内存很紧，这时候跑自测容易被系统杀掉。
+  try {
+    const bootTimer = setTimeout(() => {
+      ;(async () => {
+        try {
+          const mod = requireSelfTest();
+          const r = await mod.writeSelfTest(this.dataDir());
+          this.ctx.logger?.info?.(`[auto-guard] 自测 ${r.passed}/${r.total}` + (r.passed < r.total
+            ? '；未通过：' + r.items.filter((i) => !i.ok).map((i) => i.id).join(',')
+            : ''));
+        } catch (error) {
+          try { this.ctx.logger?.warn?.('[auto-guard] 自测失败: %s', error?.message ?? error); } catch { /* 无 logger */ }
+        }
+      })();
+    }, 12_000);
+    try { bootTimer?.unref?.(); } catch { /* 某些宿主没有 unref */ }
+  } catch { /* 自测起不来不影响调度 */ }
 
   const runOnce = async () => {
     if (stopped || running) { schedule(); return; }
