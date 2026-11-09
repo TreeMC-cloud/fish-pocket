@@ -27,6 +27,7 @@ struct DshIOSApp: App {
         .onChange(of: scenePhase) { _, phase in
             BackgroundKeeper.shared.scenePhaseChanged(to: phase)
             LiveActivityController.shared.scenePhaseChanged(to: phase)
+            if phase == .active { Diagnostics.shared.resume() }
         }
     }
 }
