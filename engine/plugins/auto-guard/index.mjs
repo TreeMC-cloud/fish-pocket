@@ -400,6 +400,20 @@ ctx.effect(() => {
     } catch (error) {
       try { this.ctx.logger?.warn?.('[auto-guard] 调度循环异常: %s', error?.message ?? error); } catch { /* 无 logger */ }
     } finally {
+      // 任务 outbox 的投递：放在 finally，而不是 tick 的成功分支里。
+      // 为什么是这里：
+      //   1. 失败/中断事件多半是**这一轮 tick 自己产生的**（后台任务跑失败、
+      //      sweep 收了僵尸），必须当轮送出去——这时候用户并没有在发消息，
+      //      等不到 turn/start。此前只有 onTurnStart 一处调用，等于「用户不说话
+      //      就永远收不到后台失败提醒」，机制在、触发无。
+      //   2. tick 抛异常、或宿主没给 agents（执行做不了）时也要投递：
+      //      「执行不了」和「送不到消息」是两件事，不能让前者把后者一起带走。
+      //   3. 重复投递由 task-registry 的 ack 挡住（pendingOutbox 只给未 ack 的），
+      //      所以和 onTurnStart 那一处并存不会弹两次。
+      // 外面再包一层 try：flush 内部已有 try/catch，但投递是"附加能力"，
+      // 绝不能因为它的任何意外把 finally 打断——那样 schedule() 不执行，
+      // 整个调度循环（连带失败重排、watchdog）就停了。
+      try { this.flushTaskOutbox(); } catch { /* 投递失败不能拖垮调度循环 */ }
       running = false;
       schedule();
     }
@@ -624,28 +638,45 @@ ctx.effect(() => {
   /**
    * 把 task registry 的 outbox 投递到提醒通道，并 ack。
    *
-   * 为什么放在每轮：没有常驻定时器的 iOS 环境里，轮次是唯一可靠的节拍。
-   * 代价是 outbox 里的消息最多晚一轮才送达——比丢了好。
+   * 两个触发点，缺一不可：
+   *   · 每轮 turn/start —— 用户在场时的低延迟通道
+   *   · 15 秒调度循环的 finally —— 用户不在场时唯一的节拍
+   *     （失败/中断事件本身就是后台 tick 产生的，那时没有轮次可等）
+   *
+   * 幂等：已 ack 的事件不会再被 pendingOutbox 选中。
+   *
+   * @returns {number} 本次真正交出去（因而 ack）的条数
    */
-  flushTaskOutbox(session) {
+  flushTaskOutbox(session = null) {
     try {
       const state = loadTasks(this.dataDir());
       const pending = pendingOutbox(state);
-      if (!pending.length) return;
+      if (!pending.length) return 0;
+      let delivered = 0;
       for (const event of pending.slice(0, 5)) {   // 一次最多 5 条，避免刷屏
         // eventId 跟着走：main.mjs 透传进 notices.jsonl，App 按 id 去重。
-        this.notify(event.message, {
+        const posted = this.notify(event.message, {
           ...(event.detail ?? {}),
           eventId: event.eventId,
           kind: event.kind,
           taskId: event.taskId,
           session: sessionId(session),
         });
-        ackTaskEvent(state, event.eventId);
+        // 只有真的交给宿主才 ack。notify() 明确知道没送出去（没有 parentPort /
+        // postMessage 抛错）时返回 false——这时候 ack 等于把事件吞了：
+        // 用户看不到，outbox 里也翻不出来。留着重投，下一拍还会再试。
+        // 用 !== false 而不是 === true：测试/宿主里替换 notify 的桩返回 undefined，
+        // 那属于「未知」，按原来的语义照样 ack；只有明确的 false 才拦。
+        if (posted !== false) {
+          ackTaskEvent(state, event.eventId);
+          delivered += 1;
+        }
       }
-      saveTasks(state, this.dataDir());
+      if (delivered) saveTasks(state, this.dataDir());
+      return delivered;
     } catch (error) {
       try { this.ctx.logger?.warn?.('[auto-guard] task outbox 投递失败: %s', error?.message ?? error); } catch { /* 无 logger */ }
+      return 0;
     }
   }
 
@@ -1232,7 +1263,13 @@ ctx.effect(() => {
       this.ctx.logger?.warn?.('[auto-guard] %s', message);
     } catch { /* logger 不可用不致命 */ }
     try {
-      parentPort?.postMessage({ type: 'dsh-ios/notice', level: 'warn', message, detail });
-    } catch { /* 桌面跑时没有 parentPort */ }
+      // 没有宿主通道（桌面直跑、或插件被放进主线程而不 Worker）时明确返回 false：
+      // 调用方据此判断「事件没送出去」，不要 ack。假装成功会让提醒永久消失。
+      if (!parentPort) return false;
+      parentPort.postMessage({ type: 'dsh-ios/notice', level: 'warn', message, detail });
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
