@@ -1177,6 +1177,14 @@ ctx.effect(() => {
       });
 
       s.traceWritten = true;
+
+      // 再刷一次快照。
+      //
+      // 为什么刷两次：上面那次（this.onTurnEnd 开头）跑在 **trace 落盘之前**，
+      // 所以快照里的「记录 N 轮」永远落后一轮——只有一轮对话的用户，
+      // 面板会一直显示「还没开始干活」，看起来像功能没生效。
+      // 快照是纯投影，多刷一次的代价是几毫秒的文件读。
+      try { requireCapabilityStatus().writeStatus(this.dataDir()); } catch { /* 面板读不到不影响对话 */ }
     } catch (error) {
       try { this.ctx.logger?.warn?.('[auto-guard] trace 记账失败: %s', error?.message ?? error); } catch { /* 无 logger */ }
     }
