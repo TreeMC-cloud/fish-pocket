@@ -1109,6 +1109,39 @@ ctx.effect(() => {
    *
    * 失败绝不打断流程：trace 是副产物，坏了就坏了。
    */
+  /**
+   * 从会话事件里读最后一条 assistant 文本，找 `ACCEPT: PASS|FAIL`。
+   *
+   * 为什么单独扫一遍而不是复用 trace 那段：trace 记账在 onTurnEnd 末尾，
+   * 而自检结果要在这之前交给任务表。两处各扫一次的成本可以忽略
+   * （一轮最多几百条事件，且只取最后 1200 字）。
+   */
+  readAcceptance(session) {
+    const events = typeof session?.ownEvents === 'function' ? session.ownEvents() : session?.events;
+    if (!Array.isArray(events)) return null;
+    let text = '';
+    for (let i = events.length - 1; i >= 0 && !text; i -= 1) {
+      const e = events[i];
+      if (e?.type !== 'assistant/message') continue;
+      const content = e.data?.message?.content ?? e.data?.content ?? [];
+      const parts = [];
+      for (const b of content) if (b?.type === 'text' && typeof b.text === 'string') parts.push(b.text);
+      if (parts.length > 0) text = parts.join(' ').slice(-1200);
+    }
+    if (!text) return null;
+    const m = text.match(/ACCEPT:\s*(PASS|FAIL)\b([^\n]*)/i);
+    if (!m) return null;
+    const result = m[1].toUpperCase() === 'PASS' ? 'pass' : 'fail';
+    const reason = (m[2] ?? '').trim() || null;
+    if (result === 'fail') {
+      try {
+        this.notify(`任务自检没过：${reason ?? '未说明原因'}`,
+                    { kind: 'task_failed', session: sessionId(session) });
+      } catch { /* 提醒失败不影响记账 */ }
+    }
+    return { result, reason };
+  }
+
   onTurnEnd(session, event) {
     try {
       // 飞行记录：这一轮结束了，把它从在跑集合里摘掉。
@@ -1138,6 +1171,14 @@ ctx.effect(() => {
         s.skillsThisTurn = [];
       }
 
+      // 自检标记要在任务收尾**之前**解析：onTurnEnd 要把结果写进任务表。
+      // 从会话事件里取最后一条 assistant 文本的尾部——正文里引用到
+      // 「ACCEPT」这两个词的概率远低于它作为格式标记出现的概率，
+      // 但只扫结尾 1200 字能再降低误判。
+      try {
+        this.lastAcceptance = this.readAcceptance(session);
+      } catch { this.lastAcceptance = null; }
+
       // 任务收尾：按 turn/end 的真实原因转终态。
       // 必须在 writeStatus **之前**——快照统计的是任务表，
       // 先刷快照再改状态，面板永远显示上一轮的样子。
@@ -1148,7 +1189,9 @@ ctx.effect(() => {
             turn: event.data.turn,
             reasonKind: reason,
             error: event?.data?.reason?.error?.message ?? null,
+            acceptance: this.lastAcceptance ?? null,
           });
+          this.lastAcceptance = null;
         } catch { /* 记账是副产物 */ }
       }
 
