@@ -61,7 +61,7 @@ final class SessionModel {
     func resumeInterruptedTurn() async -> Bool {
         guard let last = lastUserMessage() else { return false }
         let step = interruptedNotice.map { "（上一次中断信息：\($0)）" } ?? ""
-        let prefix = "（上一轮被引擎重启打断\(step)。请先确认已经完成了哪些步骤，从中断处继续；"
+        let prefix = "（上一轮被引擎重启打断\(step)。继续之前必须先核对：已经改了哪些文件、跑过哪些命令，" + "用只读命令确认它们的当前状态，再决定从哪一步接着做；"
             + "不要重复执行已经有副作用的操作。）"
         await send(text: prefix + "\n" + last.text)
         dismissInterruptedNotice()
