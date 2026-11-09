@@ -62,7 +62,16 @@ export function buildStatus(dataDir, { now = Date.now(), traceLimit = 200 } = {}
     }
     const byStatus = {};
     for (const t of Object.values(tasks.tasks)) {
-      const s = t?.status ?? 'unknown';
+      // 投递型任务（只把消息塞进会话）的 status 恒为 succeeded——
+      // 那只说明「投进去了」，真正的成败在那一轮的 turnOutcome 里。
+      // 直接按 status 统计会把「投递成功但那一轮失败」算成成功，
+      // 面板上的成功率于是虚高，改道规则也失去意义。
+      // 按 turnOutcome 归类，还没回来的保持「已投递」。
+      let s = t?.status ?? 'unknown';
+      if (t?.deliveredOnly === true) {
+        s = t.turnOutcome == null ? 'in_flight'
+          : (t.turnOutcome === 'completed' ? 'delivered_ok' : 'delivered_failed');
+      }
       byStatus[s] = (byStatus[s] ?? 0) + 1;
     }
     // 待人工确认的任务要露出来。
