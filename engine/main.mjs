@@ -15,6 +15,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
 import { PRELOAD } from './runtime/real-paths.mjs';
+import { mergeAgentsMd } from './runtime/agents-md.mjs';
 import { createNoticeAdmission } from './runtime/notice-admission.mjs';
 import { reportInterrupted } from './runtime/flight-recorder.mjs';
 
@@ -42,40 +43,22 @@ for (const dir of Object.values(dirs)) fs.mkdirSync(dir, { recursive: true });
 // 更新时按标记切分，只替换标记之前的那一段，其余原样保留。
 // 老设备没有这个标记时：有 SCENE 就从 SCENE 切；两者都没有，先备份再覆盖
 // （备份成 AGENTS.md.bak-<时间戳>，不静默丢内容）。
-const BUNDLED_END = '<!-- BUNDLED:END -->';
 const rules = path.join(path.dirname(fileURLToPath(import.meta.url)), 'AGENTS.md');
 const rulesTarget = path.join(dirs.DSH_HOME, 'AGENTS.md');
 try {
   if (fs.existsSync(rules)) {
-    const bundledRaw = fs.readFileSync(rules, 'utf8').trimEnd();
-    const bundled = bundledRaw.endsWith(BUNDLED_END) ? bundledRaw : `${bundledRaw}\n${BUNDLED_END}`;
-    if (!fs.existsSync(rulesTarget)) {
-      fs.writeFileSync(rulesTarget, bundled, 'utf8');
-    } else {
-      const existing = fs.readFileSync(rulesTarget, 'utf8');
-      let next = existing;
-      const bundledMark = existing.indexOf(BUNDLED_END);
-      if (bundledMark >= 0) {
-        // 正常路径：替换掉旧的铁律段，保留标记之后的所有内容。
-        const tail = existing.slice(bundledMark + BUNDLED_END.length);
-        next = `${bundled}${tail}`;
-      } else {
-        const sceneMark = existing.indexOf('<!-- SCENE:BEGIN -->');
-        if (sceneMark >= 0) {
-          // 老设备：铁律在前、SCENE 段在后，从 SCENE 处切开。
-          next = `${bundled}\n\n${existing.slice(sceneMark)}`;
-        } else {
-          // 两者都没有：分不清哪部分是旧铁律、哪部分是用户自己写的。
-          // 备份再覆盖，宁可留一份 .bak，也不要静默丢掉用户写的东西。
-          try {
-            fs.writeFileSync(`${rulesTarget}.bak-${Date.now()}`, existing, 'utf8');
-          } catch { /* 备份失败也要继续，否则身份文件永远更新不了 */ }
-          next = bundled;
-        }
-      }
-      // 只有在内容真的变了时才写盘，避免每次都改 mtime
-      if (next !== existing) fs.writeFileSync(rulesTarget, next, 'utf8');
+    const bundledRaw = fs.readFileSync(rules, 'utf8');
+    const existing = fs.existsSync(rulesTarget) ? fs.readFileSync(rulesTarget, 'utf8') : null;
+    const { next, changed, overwrite } = mergeAgentsMd(bundledRaw, existing);
+    // 合并逻辑抽在 runtime/agents-md.mjs 里：这里一 import 就有副作用，没法测，
+    // 而那段逻辑决定「身份更新能不能传到设备」，必须有测试。
+    if (overwrite) {
+      // 分不清哪部分是旧铁律、哪部分是用户手写：先留一份再覆盖。
+      // 备份失败也继续——否则身份文件永远更新不了。
+      try { fs.writeFileSync(`${rulesTarget}.bak-${Date.now()}`, existing, 'utf8'); } catch { /* 尽力而为 */ }
     }
+    // 内容真的变了才写，避免每次都改 mtime。
+    if (changed) fs.writeFileSync(rulesTarget, next, 'utf8');
   }
 } catch (error) {
   console.error('[dsh-ios] could not install AGENTS.md', error);
