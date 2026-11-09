@@ -13,6 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { distill as defaultDistill } from './consolidate.mjs';
+import { deriveCandidates, appendCandidates } from './candidates.mjs';
 
 /** Dream 的默认预算：单次最多处理多少条 trace。 */
 export const DEFAULT_BUDGET = 200;
@@ -178,6 +179,19 @@ export function runDream(dataDir, {
       }
     }
 
+    // 候选技能：和上面那一批同一份数据、同一个门槛，顺手写进候选表。
+    //
+    // 为什么放在这里：此前 Dream 自动整理只把经验写进记忆库，候选表要靠
+    // 用户手动跑 `trace.mjs distill` 才有内容。结果就是「自动整理」看着在跑，
+    // 但进化链路的一半永远是空的。接上之后：
+    //   自动记账 → 自动整理 → 自动产出候选   ← 到这里全自动
+    //   人只剩一步：看一眼候选、补全骨架
+    // 判据和指纹都由 candidates.mjs 统一提供，不在这里另写一份。
+    let candidateStats = { added: 0, skipped: 0 };
+    try {
+      candidateStats = appendCandidates(dataDir, deriveCandidates(slice, { now }));
+    } catch { /* 候选写不了不影响记忆落库 */ }
+
     const newestTraceAt = slice.reduce((max, t) => Math.max(max, Number(t.at) || 0), 0);
     writeState(dataDir, {
       lastRunAt: startedAt,
@@ -185,8 +199,14 @@ export function runDream(dataDir, {
       runs: readState(dataDir).runs + 1,
     });
 
-    audit({ event: 'dream', processed: slice.length, produced: produced.length, stored, budget });
-    return { ran: true, processed: slice.length, produced, stored };
+    audit({
+      event: 'dream', processed: slice.length, produced: produced.length, stored, budget,
+      candidatesAdded: candidateStats.added, candidatesSkipped: candidateStats.skipped,
+    });
+    return {
+      ran: true, processed: slice.length, produced, stored,
+      candidatesAdded: candidateStats.added, candidatesSkipped: candidateStats.skipped,
+    };
   } catch (error) {
     audit({ event: 'dream-error', error: String(error?.message ?? error).slice(0, 200) });
     return { ran: false, reason: `整理失败：${error?.message ?? error}` };
