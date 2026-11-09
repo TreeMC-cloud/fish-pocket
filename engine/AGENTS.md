@@ -148,3 +148,5 @@ node "$DSH_TOOLS/evolve/trace.mjs" list       # 看最近干了什么
 | `shared` | 跨场景的待办 / 通知 / 索引 |
 | `preferences` | 记「你喜欢怎样」：叫法、格式、边界 |
 | `ios-environment` | 不确定某个 shell 命令能不能用 |
+
+<!-- BUNDLED:END -->
