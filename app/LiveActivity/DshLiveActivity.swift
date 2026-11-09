@@ -5,7 +5,14 @@ import WidgetKit
 
 @main
 struct DshWidgets: WidgetBundle {
-    var body: some Widget { DshLiveActivity() }
+    var body: some Widget {
+        DshLiveActivity()
+        // 控制中心按钮（iOS 18+）。放在这个扩展里而不是主 App：
+        // ControlWidget 必须由 widget extension 提供。
+        if #available(iOS 18.0, *) {
+            NewConversationControl()
+        }
+    }
 }
 
 /// Agent status on the lock screen and in the Dynamic Island: a status dot and
