@@ -59,7 +59,11 @@ export function makeRunTask({ ctx, createUserMessage, logger = null }) {
         content: [{ type: 'text', text }],
         source: { kind: 'schedule' },
       }));
-      return { ok: true };
+      // ⚠ 这里的 ok 只代表「消息投进去了」，**不代表这一轮做完了**。
+      // inject 是异步投递：返回时 turn 还没开始跑，后面失败/中断都与这里无关。
+      // 明确标 delivered，让任务表能如实显示「已投递」而不是「已完成」。
+      // 投递成功却在表里写"成功"，是最容易骗过自己的那种状态。
+      return { ok: true, delivered: true };
     } catch (error) {
       return { ok: false, error: error?.message ?? String(error) };
     }
