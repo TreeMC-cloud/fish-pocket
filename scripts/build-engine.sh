@@ -14,10 +14,33 @@ out="$root/app/build/nodejs-project"
 
 rm -rf "$out"
 mkdir -p "$out"
-if [ -f "$root/.engine-cache/nodejs-project.tar" ]; then
-  tar -xf "$root/.engine-cache/nodejs-project.tar" -C "$out"
-  echo "engine: restored from cache (engine/ unchanged)"
-  exit 0
+# 缓存快路径：engine/ 内容没变时直接展开产物树，跳过 npm install 和剪枝。
+#
+# ⚠ 但必须**校验源码指纹**，不能"有缓存就用"。
+# 原来的写法只判断 tar 存在就 exit 0，于是：
+#   - 源码改了、tar 还是旧的 → 装进 App 的是**旧代码**
+#   - 表现是"我明明改了，真机上还是老行为"，而且完全静默
+# 实测踩过：仓库里 auto-guard 1237 行，打进包的是 993 行。
+# 现在把 engine/ 全部源码的哈希写进 tar 旁边，不一致就重建。
+CACHE_TAR="$root/.engine-cache/nodejs-project.tar"
+CACHE_STAMP="$root/.engine-cache/source.sha256"
+src_hash() {
+  # 只算真正会影响产物的东西：源码 + 依赖声明。node_modules 不算（它是产物）。
+  ( cd "$src" && find . \
+      -path ./node_modules -prune -o \
+      -type f \( -name '*.mjs' -o -name '*.js' -o -name '*.json' -o -name '*.yml' -o -name '*.yaml' -o -name '*.md' -o -name '*.sh' -o -name '*.txt' -o -name '*.cjs' -o -name '*.mts' -o -name '*.cts' \) \
+      -print 2>/dev/null | LC_ALL=C sort | xargs -r sha256sum 2>/dev/null | sha256sum | cut -d' ' -f1 )
+}
+if [ -f "$CACHE_TAR" ] && [ -f "$CACHE_STAMP" ]; then
+  want="$(src_hash)"
+  have="$(cat "$CACHE_STAMP" 2>/dev/null || echo '')"
+  if [ -n "$want" ] && [ "$want" = "$have" ]; then
+    tar -xf "$CACHE_TAR" -C "$out"
+    echo "engine: restored from cache (engine/ fingerprint matches $want)"
+    exit 0
+  fi
+  echo "engine: cache stale (source changed), rebuilding"
+  rm -f "$CACHE_TAR" "$CACHE_STAMP"
 fi
 cp "$src/package.json" "$src/main.mjs" "$src/boot.mjs" "$src/ios.patch.yml" "$out/"
 # smoke.mjs 放在树根：它天然按树内 node_modules 解析依赖，
@@ -167,5 +190,9 @@ after2=$(du -sk "$nm" | cut -f1)
 echo "engine: final $((after2/1024)) MB (pruned $(( (after-after2)/1024 )) MB)"
 
 # CI 提速：产出树归档一份供 actions/cache 缓存。
+# 指纹必须和 tar 一起写：下次命中缓存时靠它判断源码有没有变。
+# 少写这一行，缓存就退化成"永远命中"，装进 App 的会一直是旧代码。
 mkdir -p "$root/.engine-cache"
-tar -cf "$root/.engine-cache/nodejs-project.tar" -C "$out" .
+tar -cf "$CACHE_TAR" -C "$out" .
+src_hash > "$CACHE_STAMP"
+echo "engine: cached with fingerprint $(cat "$CACHE_STAMP")"
