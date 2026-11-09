@@ -108,6 +108,7 @@ export class Router {
       sceneId: event.sceneId ?? null,
       parentTaskId: event.parentTaskId ?? null,
       threadKey: event.threadKey ?? null,
+      note: event.note ?? null,
       approval: verdict.action === 'await_approval' ? 'pending' : 'none',
     }, this.now());
 
