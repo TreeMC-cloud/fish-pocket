@@ -208,7 +208,7 @@ function idempotencyKey(source, eventId, fallback) {
  * （调用方要能分辨：`created: false` 表示这次是重投）。
  */
 export function create(state, input, now = Date.now()) {
-  const { source, eventId, title, sceneId = null, parentTaskId = null, threadKey = null, approval = 'none' } = input ?? {};
+  const { source, eventId, title, sceneId = null, parentTaskId = null, threadKey = null, approval = 'none', note = null } = input ?? {};
   if (!title || !String(title).trim()) throw new TaskError('建任务必须给 title', 'usage');
 
   const key = idempotencyKey(source, eventId, null);
@@ -226,6 +226,9 @@ export function create(state, input, now = Date.now()) {
     sceneId,
     parentTaskId,
     title: String(title).trim().slice(0, 200),
+    // 任务正文（可选）。title 只留 200 字用于展示，真正的指令放在 note：
+    // 派给 agent 的活往往不止一句话，塞进 title 会被截断成半个需求。
+    note: note == null ? null : String(note).slice(0, 4000),
     status: 'received',
     owner: 'router',
     createdAt: now,
