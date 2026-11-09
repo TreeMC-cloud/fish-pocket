@@ -147,15 +147,20 @@ test('distill 写出的候选文件，promote 必须能读到（跨模块文件�
   // 直接比对。这样以后谁改了其中一个，测试立刻红。
   const { readFileSync } = await import('node:fs');
   const here = new URL('.', import.meta.url);
-  const traceSrc = readFileSync(new URL('../skills/evolve/trace.mjs', here), 'utf8');
+  const candSrc = readFileSync(new URL('../runtime/candidates.mjs', here), 'utf8');
   const promoteSrc = readFileSync(new URL('../skills/evolve/promote.mjs', here), 'utf8');
+  const traceSrc = readFileSync(new URL('../skills/evolve/trace.mjs', here), 'utf8');
   const nameOf = (src) => {
     const m = src.match(/'(\.[a-z-]*candidates\.jsonl)'/);
     return m ? m[1] : null;
   };
-  const a = nameOf(traceSrc);
-  const b = nameOf(promoteSrc);
-  assert.ok(a, 'trace.mjs 里应该能找到候选文件名');
-  assert.ok(b, 'promote.mjs 里应该能找到候选文件名');
-  assert.equal(a, b, `两个模块的候选文件名必须一致，现在分别是 ${a} 和 ${b}`);
+  const def = nameOf(candSrc);
+  const rd = nameOf(promoteSrc);
+  assert.ok(def, '候选文件名的唯一定义处是 runtime/candidates.mjs');
+  assert.ok(rd, 'promote.mjs 里应该能找到候选文件名');
+  assert.equal(def, rd, `定义与读取的候选文件名必须一致，现在分别是 ${def} 和 ${rd}`);
+  // trace.mjs 不应该再自己写一份文件名：它必须走共享模块，
+  // 否则「手动 distill」和「自动整理」又会算出两套东西。
+  assert.match(traceSrc, /from '\.\.\/\.\.\/runtime\/candidates\.mjs'/,
+    'trace.mjs 必须复用 candidates.mjs，不能自己再拼一份');
 });
