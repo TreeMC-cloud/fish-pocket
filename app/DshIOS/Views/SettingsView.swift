@@ -101,6 +101,8 @@ struct SettingsView: View {
                     // 能力地图原来是空会话页里的一块，有对话就永远看不到。
                     // 治理层做的事（任务、整理、技能、告警）需要常驻入口，放这里连同「插件／自动化」一起。
                     NavigationLink { CapabilityPage() } label: { valueRow("能力地图", capabilitySummary) }
+                    // 自检放在能力地图下面：先看「有什么」，再看「真的生效了吗」。
+                    NavigationLink("引擎自检") { SelfCheckPage() }
                 }
                 .groupedRow()
 
