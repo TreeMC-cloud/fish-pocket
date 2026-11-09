@@ -36,6 +36,7 @@ struct LearnPage: View {
                     tagsSection(snapshot)
                 }
                 candidatesSection(snapshot)
+                actionsSection(snapshot)
             }
         }
         .groupedList()
@@ -175,6 +176,40 @@ struct LearnPage: View {
     /// 下半段：提炼出的候选。每条给出证据（样本数、失败率、坑与当时的解法）
     /// 和状态（verified）。空的时候如实说「还没有提炼出候选」并把判据写清，
     /// 不写「一切正常」——「提炼没跑」和「跑了但没产出」是两回事。
+    private func actionsSection(_ s: LearnSnapshot) -> some View {
+        Section {
+            if s.actions.isEmpty {
+                Text("还没有主动动作。它会在同一个坑反复失败、或有东西等你确认时自己判断要不要动。")
+                    .font(.caption)
+                    .foregroundStyle(Palette.secondary)
+            } else {
+                ForEach(s.actions) { row in
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: row.action == "enqueue" ? "bolt.fill" : "bell.fill")
+                            .font(.caption2)
+                            .foregroundStyle(row.action == "enqueue" ? Palette.running : Palette.waiting)
+                            .padding(.top, 3)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(row.action == "enqueue" ? "自己派了活" : "提醒你")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(Palette.ink)
+                            Text(row.reason)
+                                .font(.caption)
+                                .foregroundStyle(Palette.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+        } header: {
+            Text("它自己做过什么")
+        } footer: {
+            Text("「自己派了活」是它判断出同一个坑反复失败后主动去查的；这类只做只读排查。需要你拍板的事只会提醒，不会自动动手。")
+        }
+        .groupedRow()
+    }
+
     private func candidatesSection(_ s: LearnSnapshot) -> some View {
         Section {
             if s.candidates.isEmpty {
@@ -297,6 +332,14 @@ struct LearnSnapshot {
         let tags: [String]
     }
 
+    /// 一条主动动作。`action` 是 `enqueue`（自己派活）或 `notify`（只提醒）。
+    struct ActionRow: Identifiable {
+        let id: String
+        let at: Double
+        let action: String
+        let reason: String
+    }
+
     /// 一条候选技能。证据是 `problem`（坑）与 `practice`（当时的解法）两段截断文本，
     /// 它们只是证据片段，不是能直接照抄的操作步骤。
     struct CandidateRow: Identifiable {
@@ -333,6 +376,9 @@ struct LearnSnapshot {
     var days: [DayCount] = []
     var topTags: [TagCount] = []
     var candidates: [CandidateRow] = []
+    /// 它自己主动做过的事（派活 / 提醒），来自 `.proactive.jsonl`。
+    /// 这一块是「主动」唯一能被看见的地方——不然用户根本不知道它自己动过。
+    var actions: [ActionRow] = []
     /// 文件里还有更早的记录没读进来。界面必须如实标注「只统计尾部」，
     /// 不能把局部说成全部。
     var truncated = false
@@ -376,6 +422,22 @@ struct LearnSnapshot {
         snapshot.traces = traces
         snapshot.days = weekDays(of: traces)
         snapshot.topTags = topTags(of: traces)
+
+        // 它自己主动做过什么。文件不存在很正常（从没触发过），不报错。
+        let actionTail = tailLines(of: dir.appendingPathComponent(".proactive.jsonl"), limit: 100)
+        var actions: [ActionRow] = []
+        for (index, line) in actionTail.lines.enumerated() {
+            guard let obj = object(from: line) else { continue }
+            let reason = (obj["reason"] as? String) ?? ""
+            guard !reason.isEmpty else { continue }
+            actions.append(ActionRow(
+                id: "\(index)-\((obj["at"] as? Double) ?? 0)",
+                at: (obj["at"] as? Double) ?? 0,
+                action: (obj["action"] as? String) ?? "?",
+                reason: reason
+            ))
+        }
+        snapshot.actions = Array(actions.suffix(20).reversed())
 
         // 候选表小得多（distill 先去重再追加），但仍用同一套尾部读取——
         // 万一它哪天变大，这里不应该跟着变成「打开就卡」。
