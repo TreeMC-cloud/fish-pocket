@@ -32,22 +32,47 @@ for (const dir of Object.values(dirs)) fs.mkdirSync(dir, { recursive: true });
 //
 // 关键：不能每次启动都覆盖写。场景身份（scene.mjs 写的 SCENE 段）和用户
 // 自己加的内容都在这个文件里，覆盖会把它们冲掉——表现为「配好的场景重启后没了」。
-// 做法：包内铁律放在 SCENE 段之外的前半部分，启动时只重写那一段，
-// 保留 SCENE 段和用户追加的内容。
+//
+// 但**也不能不更新**。原来的逻辑是「找 SCENE 标记，有就把标记后的内容接在新铁律
+// 后面；没有就用原文件不动」。而包内 AGENTS.md 本身没有 SCENE 标记，所以
+// 设备上那份（第一次安装时写入的旧版本）永远不会被更新——
+// 改了身份描述、加了记忆工具说明，真机上一点变化都没有，而且完全静默。
+//
+// 现在的做法：包内铁律以一行 `<!-- BUNDLED:END -->` 结尾，
+// 更新时按标记切分，只替换标记之前的那一段，其余原样保留。
+// 老设备没有这个标记时：有 SCENE 就从 SCENE 切；两者都没有，先备份再覆盖
+// （备份成 AGENTS.md.bak-<时间戳>，不静默丢内容）。
+const BUNDLED_END = '<!-- BUNDLED:END -->';
 const rules = path.join(path.dirname(fileURLToPath(import.meta.url)), 'AGENTS.md');
 const rulesTarget = path.join(dirs.DSH_HOME, 'AGENTS.md');
 try {
   if (fs.existsSync(rules)) {
-    const bundled = fs.readFileSync(rules, 'utf8');
+    const bundledRaw = fs.readFileSync(rules, 'utf8').trimEnd();
+    const bundled = bundledRaw.endsWith(BUNDLED_END) ? bundledRaw : `${bundledRaw}\n${BUNDLED_END}`;
     if (!fs.existsSync(rulesTarget)) {
       fs.writeFileSync(rulesTarget, bundled, 'utf8');
     } else {
       const existing = fs.readFileSync(rulesTarget, 'utf8');
-      // 场景段和它之后的内容全部保留（那是运行时生成的 + 用户加的）
-      const mark = existing.indexOf('<!-- SCENE:BEGIN -->');
-      const tail = mark >= 0 ? existing.slice(mark) : '';
-      // 用户可能还写了别的东西：以包内铁律的结尾为准，找最后一行非空内容之后
-      const next = tail ? `${bundled.trimEnd()}\n\n${tail}` : existing;
+      let next = existing;
+      const bundledMark = existing.indexOf(BUNDLED_END);
+      if (bundledMark >= 0) {
+        // 正常路径：替换掉旧的铁律段，保留标记之后的所有内容。
+        const tail = existing.slice(bundledMark + BUNDLED_END.length);
+        next = `${bundled}${tail}`;
+      } else {
+        const sceneMark = existing.indexOf('<!-- SCENE:BEGIN -->');
+        if (sceneMark >= 0) {
+          // 老设备：铁律在前、SCENE 段在后，从 SCENE 处切开。
+          next = `${bundled}\n\n${existing.slice(sceneMark)}`;
+        } else {
+          // 两者都没有：分不清哪部分是旧铁律、哪部分是用户自己写的。
+          // 备份再覆盖，宁可留一份 .bak，也不要静默丢掉用户写的东西。
+          try {
+            fs.writeFileSync(`${rulesTarget}.bak-${Date.now()}`, existing, 'utf8');
+          } catch { /* 备份失败也要继续，否则身份文件永远更新不了 */ }
+          next = bundled;
+        }
+      }
       // 只有在内容真的变了时才写盘，避免每次都改 mtime
       if (next !== existing) fs.writeFileSync(rulesTarget, next, 'utf8');
     }
