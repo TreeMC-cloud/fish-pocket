@@ -20,17 +20,21 @@ const MAIN = '../main.mjs';
 const ROUTER = '../runtime/router.mjs';
 const RUNNER = '../runtime/task-runner.mjs';
 
-test('身份：AGENTS.md 以 BUNDLED:END 收尾，main.mjs 用同一标记安装', () => {
+test('身份：AGENTS.md 以 BUNDLED:END 收尾，合并逻辑用同一标记', () => {
   const agents = read('../AGENTS.md');
   assert.match(agents, /你是 Sigma/, 'AGENTS.md 必须写明身份（每轮注入的那一份）');
   assert.ok(
     agents.trimEnd().endsWith('<!-- BUNDLED:END -->'),
-    'AGENTS.md 必须以 BUNDLED:END 结尾——main.mjs 按它切分更新，缺了会在重启后静默失效',
+    'AGENTS.md 必须以 BUNDLED:END 结尾——按它切分更新，缺了会在重启后静默失效',
   );
-  assert.match(read(MAIN), /BUNDLED_END = '<!-- BUNDLED:END -->'/, 'main.mjs 必须使用同一标记');
+  // 标记的唯一定义处现在是 agents-md.mjs（main.mjs 只负责读写文件）。
+  // 断言「同一个常量被两边共用」，而不是某个具体文件里出现过这行字符串。
+  const mod = read('../runtime/agents-md.mjs');
+  assert.match(mod, /BUNDLED_END = '<!-- BUNDLED:END -->'/, '合并模块必须用同一个标记');
+  assert.match(read(MAIN), /mergeAgentsMd/, 'main.mjs 必须调用合并模块，而不是自己拼');
   assert.match(
     read(MAIN),
-    /rulesTarget = path\.join\(dirs\.DSH_HOME, 'AGENTS\.md'\)/,
+    /dirs\.DSH_HOME, 'AGENTS\.md'/,
     '安装位置必须是 $DSH_HOME/AGENTS.md',
   );
 });
