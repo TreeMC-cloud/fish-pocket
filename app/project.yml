@@ -85,11 +85,11 @@ targets:
         # **只对这一个地址开口子**，不开 NSAllowsArbitraryLoads：
         # 那个开关会让整个 App（含内嵌浏览器）接受任意明文连接，
         # 既没必要也是安全隐患。服务器换成 HTTPS 之后，这一整段可以删掉。
-        NSAppTransportSecurity:
-          NSExceptionDomains:
-            202.189.51.44:
-              NSExceptionAllowsInsecureHTTPLoads: true
-              NSIncludesSubdomains: false
+        # ⚠ 只能有一个 NSAppTransportSecurity 块。
+        # 之前这里写了两份（一份给诊断服务器开例外、一份开任意加载），
+        # YAML 重复键会被后者整块覆盖——前一份等于没写，而改前一份的人
+        # 会以为已经生效。合并成一份，所有例外都在这里。
+        #
         # The engine serves plain HTTP on 127.0.0.1 only.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
