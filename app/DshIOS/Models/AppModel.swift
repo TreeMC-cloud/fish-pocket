@@ -259,6 +259,36 @@ final class AppModel {
     ///
     /// 文件名带 UUID：同一个请求不会被处理两次（引擎按文件名幂等）。
     @discardableResult
+    /// 往任务队列投一条新活（引擎的 enqueue 动作）。
+    ///
+    /// 和 `controlTask` 走同一条文件通道：App 落一个请求文件，
+    /// 引擎的 15 秒调度循环扫到就建任务、排队、投进会话。
+    /// 这样「让它干点什么」不再只有「在对话里说一句」这一条路——
+    /// 关掉对话也能派活，这是「主动」能被用起来的前提。
+    @discardableResult
+    func enqueueTask(text: String, sessionId: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !sessionId.isEmpty else { return false }
+        let dir = EnginePaths.real(EnginePaths.shared + "/task-control")
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let body: [String: Any] = [
+                "action": "enqueue",
+                "sessionId": sessionId,
+                "text": trimmed,
+                // 幂等键由客户端给：同样的内容重复点两次，只该跑一次。
+                "eventId": "app-\(UUID().uuidString.lowercased())",
+            ]
+            let data = try JSONSerialization.data(withJSONObject: body)
+            let name = "req-\(UUID().uuidString.lowercased()).json"
+            try data.write(to: dir.appendingPathComponent(name))
+            return true
+        } catch {
+            showToast(String(localized: "任务写入失败：\(error.localizedDescription)"), duration: 5)
+            return false
+        }
+    }
+
     func controlTask(_ action: String, taskId: String? = nil) -> Bool {
         let dir = EnginePaths.real(EnginePaths.shared + "/task-control")
         do {
