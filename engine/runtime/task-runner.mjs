@@ -82,12 +82,34 @@ export function buildPrompt(task) {
   const title = String(task?.note ?? task?.title ?? '').trim();
   const source = String(task?.source ?? '');
   const origin = source.startsWith('session:') ? '自动重排' : source;
-  return [
+  const lines = [
     `[自动任务 · ${origin}]`,
     title || '（无标题任务）',
     '',
     '这是任务队列派下来的工作，直接执行，不需要确认。',
-  ].join('\n');
+  ];
+
+  // 有完成标准的任务，要求它**自己核对**再收工。
+  //
+  // 为什么值得多写这几行：没有标准的任务是「尽力而为」，
+  // 用户只能在事后发现不对，然后重来一轮。有了标准，它自己在收工前
+  // 就能发现「其实没做到」，当场补——这比任何新功能都提升手感。
+  const acceptance = String(task?.acceptance ?? '').trim();
+  if (acceptance) {
+    lines.push(
+      '',
+      '## 完成标准（收工前必须逐条核对）',
+      acceptance,
+      '',
+      '核对方式：能跑命令就用命令验证，不要凭印象说「应该没问题」。',
+      '有任一条不满足，先自己补做；补不了就在最后一行写明哪条没过、为什么。',
+      '',
+      '最后一行必须是下面两种形式之一（这行会被程序读走，不要改写格式）：',
+      'ACCEPT: PASS',
+      'ACCEPT: FAIL <一句话说明哪条没过>',
+    );
+  }
+  return lines.join('\n');
 }
 
 /**
