@@ -47,6 +47,28 @@ struct CapabilityPage: View {
             .groupedRow()
 
             Section {
+                // 经验页的完整视图：运行状态那块只给「经验 N 条」一个数字，
+                // 「它到底学到了什么」需要一个能看统计和候选技能的地方。
+                NavigationLink {
+                    LearnPage()
+                } label: {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("经验")
+                        Text(learnSummary)
+                            .font(.caption)
+                            .foregroundStyle(Palette.secondary)
+                            .lineLimit(1)
+                    }
+                    .padding(.vertical, 2)
+                }
+            } header: {
+                Text("进化")
+            } footer: {
+                Text("引擎每轮对话都记一条经验，攒够后会提炼出候选技能。候选不会自动生效，需要你确认。")
+            }
+            .groupedRow()
+
+            Section {
                 ForEach(CapabilityCatalog.groups) { group in
                     NavigationLink {
                         CapabilityGroupPage(group: group)
@@ -85,6 +107,17 @@ struct CapabilityPage: View {
         if !stats.needsAttention.isEmpty {
             parts.append(String(localized: "\(stats.needsAttention.count) 个待确认"))
         }
+        return parts.joined(separator: " · ")
+    }
+
+    /// 经验那行右侧的摘要。同样只说事实：引擎没写过 trace 就写「还没有经验记录」，
+    /// 不显示成 0 条——「还没有记录」和「记录是 0」对用户不是一个意思。
+    private var learnSummary: String {
+        guard let trace = app.capability?.trace, trace.ok, trace.total > 0 else {
+            return String(localized: "还没有经验记录")
+        }
+        var parts = [String(localized: "\(trace.total) 条")]
+        if trace.failures > 0 { parts.append(String(localized: "失败 \(trace.failures)")) }
         return parts.joined(separator: " · ")
     }
 }
