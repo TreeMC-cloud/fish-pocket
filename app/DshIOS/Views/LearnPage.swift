@@ -319,8 +319,10 @@ struct LearnSnapshot {
 
     /// 一个话题标签及其出现次数。
     struct TagCount: Identifiable {
-        let id: String
+        /// 标签名本身就是身份：同一个话题在统计里只会出现一次。
+        let tag: String
         let n: Int
+        var id: String { tag }
     }
 
     /// 只读最后这么多条：trace 长期追加，全读大文件会卡住首屏。
@@ -487,6 +489,6 @@ struct LearnSnapshot {
         return freq
             .sorted { lhs, rhs in lhs.value == rhs.value ? lhs.key < rhs.key : lhs.value > rhs.value }
             .prefix(limit)
-            .map { TagCount(id: $0.key, n: $0.value) }
+            .map { TagCount(tag: $0.key, n: $0.value) }
     }
 }
