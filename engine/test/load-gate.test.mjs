@@ -40,9 +40,15 @@ test('内存读的是真实可用量，不是内核 MemFree', async () => {
   const { sample } = await import('../skills/cost-guard/load-gate.mjs');
   const s = await sample();
   assert.ok(s, '应该能采样到数据');
-  assert.equal(s.source, 'os.freemem', 'iSH 的 meminfo 没有 MemAvailable，必须退回 os.freemem');
+  // 这里**不**断言 source 具体是哪个：iSH 上 /proc/meminfo 没有 MemAvailable，
+  // 必须退回 os.freemem；Linux 上有 MemAvailable；macOS 没有 /proc 也走 freemem。
+  // 断言实现路径会把测试绑死在某个平台上——CI（Ubuntu/macOS runner）和
+  // 本地（iSH）走的不是同一条分支，写死 source 就成了「只在本地绿」的假测试。
+  // 真正要守的是**结果**：拿到的可用量得是真实可用量，不是内核空闲页。
+  assert.ok(['MemAvailable', 'os.freemem'].includes(s.source),
+    `可用量的来源不可信：${s.source}`);
   // 回归：MemFree 只有 ~64MB，若拿它当可用，会算出 97% 这种假警报。
-  // 真实可用（os.freemem）应该在总内存的 30% 以上——留足余量，不写死具体值。
+  // 真实可用应该在总内存的 30% 以上——留足余量，不写死具体值。
   assert.ok(s.freeMB > s.totalMB * 0.3,
     `可用内存 ${s.freeMB}MB / ${s.totalMB}MB 偏低，怀疑又退回了 MemFree`);
 });
