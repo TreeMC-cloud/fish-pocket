@@ -232,11 +232,17 @@ export async function runSelfCheck(dataDir, opts = {}) {
  */
 export async function writeSelfCheck(dataDir) {
   const dir = path.resolve(String(dataDir ?? ''));
+  // 先建目录再体检：否则新目录的报告里 writable 会写「不可写」，
+  // 而它刚刚成功写出了这份报告——报告自相矛盾比不报告更糟。
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch {
+    // 建不出来就让下面的 runSelfCheck 如实报「目录不存在」，不在这里提前抛。
+  }
   const result = await runSelfCheck(dir);
   const target = path.join(dir, SELFCHECK_FILE);
   const tmp = `${target}.${process.pid}.${crypto.randomBytes(3).toString('hex')}.tmp`;
   try {
-    fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(tmp, `${JSON.stringify(result, null, 2)}\n`, { mode: 0o600 });
     fs.renameSync(tmp, target);
     return { ...result, file: target };
