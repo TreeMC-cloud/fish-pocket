@@ -146,6 +146,12 @@ export function shell(writable) {
     }),
     // git writes through libgit2, not this filesystem, so it gets the confinement itself.
     customCommands: gitAvailable() ? [...custom, gitCommand(defineCommand, decodeBytesToUtf8, writable)] : custom,
+    // just-bash 的 env 是**独立的一份**，不继承 process.env。
+    // 不显式传的话，worker 里继承到的 DSH_TOOLS / DSH_HOME / DSH_IOS_DATA
+    // 在 bash 里全是空的——技能文档里 `node "$DSH_TOOLS/xxx.mjs"` 展开成
+    // `/toolbox/toolbox.mjs`，必然失败，而且不报错（只是 not found）。
+    // 真机日志实测：模型只好 find / 自己找路径，多花 4 次重试。
+    env: { ...process.env },
     network: { dangerouslyAllowFullInternetAccess: true },
     executionLimitProfile: 'normal',
     // While a script runs this replaces global eval with a proxy, so any direct
