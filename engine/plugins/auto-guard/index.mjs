@@ -622,7 +622,11 @@ ctx.effect(() => {
             lastTool: null, repeat: 0, warnedRepeat: false, warnedMem: false,
             // 本轮加载过哪些技能。记下来是为了在 turn/end 时配上**真实结果**——
             // 只在加载时记一笔的话，成功率永远是「未知」，降级规则拿不到输入。
-            skillsThisTurn: [] };
+            skillsThisTurn: [],
+            // 用户连续纠错的检测：同一个毛病被反复指出，说明上次没改对。
+            // 真机实测过：用户连说三次「文字超出框了」，模型每次都改、每次都犯。
+            lastUserText: '',
+            repeatComplaints: 0 };
       this.state.set(session, s);
     }
     return s;
@@ -721,6 +725,7 @@ ctx.effect(() => {
     } catch { /* 记不下就算了 */ }
     const s = this.runtime(session);
     s.turns += 1;
+
 
     // 子智能体的轮次不进飞行记录：用户在界面上看不到那些子会话，
     // 重启后提示「3 个任务被打断」只会让人莫名其妙——父会话自己会报。
@@ -1376,6 +1381,39 @@ ctx.effect(() => {
     } catch { /* 摘要只是锦上添花，出错不影响主流程 */ }
   }
 
+  /**
+   * 用户是不是在重复同一个抱怨。
+   *
+   * 真机上发生过：连着三轮「文字超出框了」「框里面还是有文字超出了」，
+   * 模型每次都改、每次都犯，而它自己写进记忆的教训当轮读不到
+   * （meow 的自动注入排除本会话写入的条目）。
+   *
+   * 这里不猜语义，只做两件事：认出「短句 + 抱怨词」，和在重复第二次时
+   * 提醒「上次没改对，先复述一遍你学到什么」。宁可少提醒，不要误伤
+   * 正常的追加需求。
+   */
+  noteUserText(session, text) {
+    const s = this.runtime(session);
+    const t = String(text ?? '').trim();
+    if (!t) return;
+    // 只看短句：长段通常是新需求，不是纠错。
+    const isComplaint = t.length <= 40
+      && /超出|溢出|还是|又|不对|没|错|重复|歪|乱|丑|难看|太.{0,3}了/.test(t);
+    if (isComplaint) {
+      s.repeatComplaints = (s.repeatComplaints ?? 0) + 1;
+      if (s.repeatComplaints === 2) {
+        this.notify(
+          `同一个问题第二次被指出：「${t.slice(0, 30)}」。` +
+          '先把「这次要守住什么」说清楚再改，别又是同一个地方出错。',
+          { kind: 'repeat', session: sessionId(session) },
+        );
+      }
+    } else {
+      s.repeatComplaints = 0;
+    }
+    s.lastUserText = t;
+  }
+
   /** 从工具参数里挑一句人能看懂的话：命令优先，其次路径，再其次查询词。 */
   argumentHint(part) {
     try {
@@ -1472,6 +1510,25 @@ ctx.effect(() => {
 
   onToolResult(session, event) {
     const s = this.runtime(session);
+    // 用户是不是在重复同一个抱怨。
+    // 放在这里而不是 turn/start：turn/start 时本轮的 user/message 还没落盘，
+    // 读到的永远是上一轮的文本，检测等于没用。
+    try {
+      const list = typeof session?.ownEvents === 'function' ? session.ownEvents() : session?.events;
+      const events = Array.isArray(list) ? list : [];
+      for (let i = events.length - 1; i >= 0; i -= 1) {
+        if (events[i]?.type !== 'user/message') continue;
+        for (const b of events[i].data?.content ?? []) {
+          if (b?.type === 'text' && typeof b.text === 'string'
+              && !b.text.startsWith('[') && !b.text.startsWith('【') && !b.text.startsWith('<system')) {
+            // 同一条文本只判一次：工具调很多次，不能每次都 +1
+            if (b.text !== s.lastUserText) this.noteUserText(session, b.text);
+            break;
+          }
+        }
+        break;
+      }
+    } catch { /* 认不出就不提醒 */ }
     const name = event?.data?.name ?? event?.data?.tool ?? null;
     const failed = event?.data?.isError === true || event?.data?.error != null;
     if (!name) return;
