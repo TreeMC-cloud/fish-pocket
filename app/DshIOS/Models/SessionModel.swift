@@ -99,6 +99,8 @@ final class SessionModel {
     private(set) var lastFailureCode: String?
     /// 自动换模型已经试过一次：同一轮不再第二次，防止两个模型互相甩锅时无限循环。
     private var autoSwitchedThisTurn = false
+    /// 上一轮结束时记下的累计用量：turn/end 时算差值得出「这一轮花了多少」。
+    private var lastUsage: (input: Int, output: Int, cacheRead: Int) = (0, 0, 0)
     /// A subagent's parent-scoped address; the Host refuses a plain session address
     /// for a child, and its messages and stops go through the parent. Set before `start()`.
     var subagentAddress: JSON?
@@ -196,6 +198,7 @@ final class SessionModel {
             if timeline.apply(event) { publishTimeline() } else { publishTimelineState() }
             // Only a live turn end prompts for quota or support; history replays never do.
             if event["type"].string == "turn/end" {
+                recordUsage(turn: event["data"]["turn"].int ?? -1)
                 if let failure = TurnFailure(reason: event["data"]["reason"]) {
                     lastFailureCode = failure.code
                     if failure.isQuota { app.account.reportQuota(code: failure.code ?? "QUOTA") }
@@ -292,6 +295,33 @@ final class SessionModel {
         liveAttempt = nil
         livePartials = [:]
         if !live.isEmpty { live = [] }
+    }
+
+    /// 把这一轮的用量增量写进 `usage.jsonl`，供引擎聚合、界面显示。
+    ///
+    /// 为什么由 App 写而不是引擎写：token 用量在会话投影里，而 turn/end
+    /// 那一刻引擎侧读不全（投影是异步的）。App 手里正好有累计值，算差值最准。
+    private func recordUsage(turn: Int) {
+        let delta = (
+            input: max(0, tokens.input - lastUsage.input),
+            output: max(0, tokens.output - lastUsage.output),
+            cacheRead: max(0, tokens.cacheRead - lastUsage.cacheRead)
+        )
+        lastUsage = tokens
+        // 全是 0 就不写：模型没回应、或者这是历史回放，不该占一行。
+        guard delta.input + delta.output + delta.cacheRead > 0 else { return }
+        let row: [String: Any] = [
+            "at": Int(Date().timeIntervalSince1970 * 1000),
+            "session": sessionId,
+            "turn": turn,
+            "input": delta.input,
+            "output": delta.output,
+            "cacheRead": delta.cacheRead,
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: row),
+              let line = String(data: data, encoding: .utf8) else { return }
+        let url = EnginePaths.real(EnginePaths.shared + "/usage.jsonl")
+        Diagnostics.appendLine(line, to: url)
     }
 
     // MARK: Diagnostics log
