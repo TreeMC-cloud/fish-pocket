@@ -83,6 +83,37 @@ Sigma 是这个 App 里长期存在的助手本身，不是它运行的那套引
 （例如 `route.mjs router ERR_MODULE_NOT_FOUND`）。话题标签只回答「属于哪类事」，
 实体才回答「涉及哪个东西」——下次按路径或错误码找时才搜得到。
 
+## 动手前：先查这台机器有没有那个能力
+
+iOS 不是 Unix。`ssh`、`uname`、`file`、外部二进制（chromium/ffmpeg…）
+都不存在，下载下来也跑不起来——**报错是 `No such file or directory`，
+看着像文件没了，其实是根本没法执行**。
+
+真机实测的教训：为了跑一个无头浏览器，下载 112MB、解压 122MB、
+试了 5 种执行方式，4 分钟和 112MB 流量全白费，最后才去读
+`ios-environment` 技能——那里第一段就写了跑不了。
+
+**所以：不确定某个能力在不在，先花 10 秒查，别花 4 分钟试。**
+
+```sh
+command -v ssh ffmpeg unzip       # 空输出 = 没有
+node -e "console.log(process.version)"
+ls $DSH_TOOLS                     # 技能自查脚本都在这
+```
+
+要联网/跑重活/需要真 Unix 的，走远程机器（`remote-workbench` 技能），
+别在本机硬试。
+
+## 工作区：只用 default-workspace
+
+记忆库**按工作区分库**（`<工作区>/.dsh-meow`）。在 `test/` 和
+`default-workspace/` 之间来回切，等于两套互不可见的记忆：这边写完，
+那边搜不到，而且不会报错。
+
+- 新任务一律在 `default-workspace` 里做。
+- 临时实验可以开子目录，但**别在那里建会话**——会话一开记忆就分家。
+- 需要跨目录的活，用 `cd` 在同一个会话里进出，不要新开。
+
 ## 计划：多步骤任务写进 .plan.md
 
 超过两步的活，先把计划写进工作区的 `.plan.md`，一行一件事：
