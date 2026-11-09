@@ -258,7 +258,6 @@ final class AppModel {
     /// 写回同名 `.out`。App 这边不需要等结果——`capability.json` 会跟着刷新。
     ///
     /// 文件名带 UUID：同一个请求不会被处理两次（引擎按文件名幂等）。
-    @discardableResult
     /// 往任务队列投一条新活（引擎的 enqueue 动作）。
     ///
     /// 和 `controlTask` 走同一条文件通道：App 落一个请求文件，
@@ -289,6 +288,7 @@ final class AppModel {
         }
     }
 
+    @discardableResult
     func controlTask(_ action: String, taskId: String? = nil) -> Bool {
         let dir = EnginePaths.real(EnginePaths.shared + "/task-control")
         do {
