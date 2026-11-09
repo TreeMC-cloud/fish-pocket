@@ -51,6 +51,23 @@ final class SessionModel {
         interruptedNotice = nil
     }
 
+    /// 中断之后接着做。
+    ///
+    /// 为什么不是简单重发原话：引擎重启时那一轮可能已经改了一半文件。
+    /// 原样重发会让模型从头再走一遍，把已经做过的副作用再做一次。
+    /// 所以补一句「先确认已完成的部分，别重复有副作用的操作」，
+    /// 让它在断点处接着走，而不是重来。
+    @discardableResult
+    func resumeInterruptedTurn() async -> Bool {
+        guard let last = lastUserMessage() else { return false }
+        let step = interruptedNotice.map { "（上一次中断信息：\($0)）" } ?? ""
+        let prefix = "（上一轮被引擎重启打断\(step)。请先确认已经完成了哪些步骤，从中断处继续；"
+            + "不要重复执行已经有副作用的操作。）"
+        await send(text: prefix + "\n" + last.text)
+        dismissInterruptedNotice()
+        return true
+    }
+
     private func clearInterruptedState() {
         interruptedNotice = nil
         interruptedTurn = nil
