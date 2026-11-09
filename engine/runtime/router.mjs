@@ -19,7 +19,7 @@
  *   - 不自动重跑有副作用的失败任务：走 needs_reconciliation
  *   - 每个任务只有一个 owner：抢占时校验，不是先到先得
  */
-import { load, save, create, transition, enqueue, expired, pendingOutbox, TaskError } from './task-registry.mjs';
+import { load, save, create, transition, enqueue, expired, pendingOutbox, gc as gcRegistry, TaskError } from './task-registry.mjs';
 import { gate as gateTask } from './delivery-gate.mjs';
 
 /** 默认并发：1。可被 config 覆盖，但不要在没有实测的情况下调高。 */
@@ -419,7 +419,14 @@ export class Router {
         detail: { kind: 'task_interrupted', taskId: task.taskId },
       }, this.now());
     }
-    if (dead.length) save(state, this.dataDir);
+    // 回收也放在这一趟：sweep 本来就要读一次全表、可能写一次盘，
+    // 顺手清掉过期终态任务不增加 IO。单独开一趟只会更慢。
+    //
+    // 为什么必须回收：每次 transition/requeue 都要把整张表 stringify + 落盘，
+    // 表越大越慢（O(n) 每次操作）。实测 200 个任务时一次重排要 5 秒。
+    // 而 gc() 之前**没有任何调用方**，任务表只增不减。
+    const reclaimed = gcRegistry(state, { now: this.now() });
+    if (dead.length || reclaimed.tasks > 0 || reclaimed.outbox > 0) save(state, this.dataDir);
     return dead.map((t) => t.taskId);
   }
 
