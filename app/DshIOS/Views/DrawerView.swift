@@ -88,6 +88,9 @@ struct DrawerView: View {
         .task(id: search) { await searchRemote() }
         .onChange(of: searchRequest) { searchFocused = true }
         .onChange(of: groupBy) { Haptics.select() }
+        // 切到一个会话时把它所在的分组展开——否则那个分组如果是收起状态，
+        // 用户看不出当前会话在哪儿。上游 8e37a871 的修法。
+        .onChange(of: selection) { revealSelection() }
         .confirmationDialog("删除「\(removingWorkspace?.displayTitle ?? "")」？", isPresented: Binding(get: { removingWorkspace != nil }, set: { if !$0 { removingWorkspace = nil } }), titleVisibility: .visible) {
             Button("删除工作区", role: .destructive) {
                 if let workspace = removingWorkspace {
@@ -364,9 +367,19 @@ struct DrawerView: View {
     /// Groups start open (the web opens only the current one; on a phone every
     /// workspace should be a glance away, and each shows five rows); a group the
     /// user closed stays closed unless it holds the current session.
+    /// 用户手动收起的分组就保持收起——**包括当前会话所在的那个**。
+    /// 之前是「只要含当前会话就强制展开」，导致收起后又自己弹开、折叠不了。
+    /// 想看到当前会话时由 `revealSelection()` 在切换时展开一次，而不是每帧强制。
     private func isExpanded(_ group: SessionGroup) -> Bool {
-        if let selection, group.rows.contains(where: { $0.id == selection }) { return true }
-        return expansion[group.id] ?? true
+        expansion[group.id] ?? true
+    }
+
+    /// 切到某个会话时，把它所在的分组展开一次，让人看见它落在哪。
+    private func revealSelection() {
+        guard let selection,
+              let group = groups.first(where: { $0.rows.contains { $0.id == selection } }),
+              !isExpanded(group) else { return }
+        setExpanded(group, true)
     }
 
     private func setExpanded(_ group: SessionGroup, _ open: Bool) {
