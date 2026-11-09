@@ -8,6 +8,15 @@ struct DshIOSApp: App {
     @StateObject private var engine = NodeEngine.shared
     @Environment(\.scenePhase) private var scenePhase
 
+    init() {
+        // Siri / 快捷指令 / 控制中心按钮：Intent 拿不到 SwiftUI 环境对象，
+        // 所以在这里把「怎么开新对话」装进静态闭包。
+        // 走已有的 AppModel.newSessionRequest（它本来支持 draft），不另造分发层。
+        DshIntentBridge.newConversation = { draft in
+            EngineConnection.shared.app?.newSessionRequest = NewSessionRequest(draft: draft)
+        }
+    }
+
     var body: some Scene {
         WindowGroup(id: Self.window, for: SessionWindow.self) { $window in
             RootView(session: window?.session)
