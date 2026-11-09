@@ -26,7 +26,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 /** 允许的动作。白名单，未知动作直接拒绝（不让文件变成任意代码执行）。 */
-const ACTIONS = new Set(['requeue', 'cancel', 'list']);
+const ACTIONS = new Set(['requeue', 'cancel', 'list', 'enqueue']);
 
 export function controlDir(dataDir) {
   return path.join(dataDir, 'task-control');
@@ -52,6 +52,44 @@ export function handle(router, request) {
       updatedAt: t.updatedAt ?? 0,
     }));
     return { ok: true, total: rows.length, tasks: rows.slice(0, 200) };
+  }
+
+  // 投递新任务：这是「自主任务源」缺的那一环。
+  //
+  // 此前队列里只会有 requeue 进来的任务（用户点「重排」），所以 Router
+  // 本质是个失败重试队列，不是能接活的调度器。有了 enqueue，外部
+  // （App、定时任务、脚本）就能把活放进同一个队列，走同一套准入、
+  // 幂等、租约、失败改道——而不是各写一套。
+  if (action === 'enqueue') {
+    const sessionId = String(request?.sessionId ?? '');
+    const text = String(request?.text ?? '').trim();
+    if (!sessionId) return { ok: false, error: '缺少 sessionId（要投给哪个会话）' };
+    if (!text) return { ok: false, error: '缺少 text（要它做什么）' };
+    // 幂等键由调用方给：同一件事重复投递不该跑两遍。
+    const eventId = String(request?.eventId ?? `enqueue:${Date.now()}`);
+    try {
+      // 显式放行 'external'：默认白名单里没有它，是为了让「谁建的任务」
+      // 这件事保持明确——不认识的来源一律忽略。这里是唯一的投递入口，
+      // 所以只在这个调用点放行，而不是把 'external' 加进全局默认值。
+      const result = router.accept({
+        source: 'external',
+        eventId,
+        title: text.slice(0, 200),
+        note: text,
+        threadKey: sessionId,
+      }, {
+        allowedSources: ['user', 'schedule', 'agent-message', 'webhook', 'external'],
+      });
+      return {
+        ok: true,
+        created: result.created === true,
+        action: result.action,
+        taskId: result.task?.taskId ?? null,
+        status: result.task?.status ?? null,
+      };
+    } catch (error) {
+      return { ok: false, error: error?.message ?? String(error) };
+    }
   }
 
   const taskId = String(request?.taskId ?? '');
