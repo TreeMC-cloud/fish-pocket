@@ -204,6 +204,12 @@ struct TaskListPage: View {
     /// 投递型任务的状态要说得更准：
     /// 「已投递」只是发出去了；知道后续结果时补上成败，不知道就老实说不知道。
     private func statusText(_ task: TaskSnapshot.Row) -> String {
+        // 自检没过优先显示：任务「做完了」但没达标，这在用户眼里等同于失败。
+        // 只显示「已完成」会让他以为没事。
+        if task.acceptance == "fail" {
+            let why = task.acceptanceReason.flatMap { $0.isEmpty ? nil : $0 }
+            return why.map { String(localized: "自检没过 · \($0)") } ?? String(localized: "自检没过")
+        }
         guard task.deliveredOnly, task.status == "succeeded" else { return label(task.status) }
         guard let outcome = task.turnOutcome else { return String(localized: "已投递 · 结果未知") }
         switch outcome {
@@ -268,6 +274,8 @@ struct TaskSnapshot {
         /// 只是「消息投进去了」，真正的成败在那一轮对话里。
         /// 不区分的话，一轮失败之后表里仍写着「已完成」，账本就不可信了。
         let deliveredOnly: Bool
+        let acceptance: String?
+        let acceptanceReason: String?
         /// 投递之后那一轮的真实结果（`completed` / `error` / `aborted`…）。
         /// nil 表示「还没跑完」或「不是投递型任务」——不猜。
         let turnOutcome: String?
@@ -298,6 +306,8 @@ struct TaskSnapshot {
                 updatedAt: (dict["updatedAt"] as? Double) ?? (dict["createdAt"] as? Double) ?? 0,
                 lastError: dict["lastError"] as? String,
                 deliveredOnly: (dict["deliveredOnly"] as? Bool) ?? false,
+                acceptance: dict["acceptanceResult"] as? String,
+                acceptanceReason: dict["acceptanceReason"] as? String,
                 turnOutcome: dict["turnOutcome"] as? String
             )
         }
