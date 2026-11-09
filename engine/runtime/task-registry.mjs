@@ -301,10 +301,37 @@ export function ack(state, eventId, now = Date.now()) {
  * 清理已 ack 且超过保留期的事件。
  * 保留期存在的理由：短时间内的重复 ack 要能识别，长期堆着又要占空间。
  */
-export function gc(state, { now = Date.now(), keepMs = 24 * 60 * 60_000 } = {}) {
+/**
+ * 回收：清掉过期的 outbox 和**已终结的旧任务**。
+ *
+ * 任务那部分是后加的。原来这里只清 outbox，任务表只增不减——
+ * 而每次 requeue / transition 都要把整张表 JSON.stringify + 落盘，
+ * 所以表越大越慢，是 O(n) 每次操作。基准测出来 200 个任务时
+ * 单次 requeue 要 25ms，一次重排 200 条就是 5 秒。
+ *
+ * 只删**终态**（succeeded / cancelled / ignored）且超过保留期的任务：
+ * 失败和中断的任务要留着，那是用户还要处理的东西。
+ *
+ * @param keepTasksMs 终态任务保留多久（默认 24 小时）
+ */
+export function gc(state, { now = Date.now(), keepMs = 24 * 60 * 60_000, keepTasksMs = 24 * 60 * 60_000 } = {}) {
   const before = state.outbox.length;
   state.outbox = state.outbox.filter((e) => !e.ackedAt || now - e.ackedAt < keepMs);
-  return before - state.outbox.length;
+  const removedOutbox = before - state.outbox.length;
+
+  let removedTasks = 0;
+  for (const [id, task] of Object.entries(state.tasks)) {
+    if (!TERMINAL.has(task?.status)) continue;
+    const age = now - (task.updatedAt ?? task.createdAt ?? 0);
+    if (age < keepTasksMs) continue;
+    delete state.tasks[id];
+    removedTasks += 1;
+    // 幂等键也要一起删，否则同一条 schedule 事件再来时会被当成"已处理"。
+    for (const [key, value] of Object.entries(state.idempotency)) {
+      if (value === id) delete state.idempotency[key];
+    }
+  }
+  return { outbox: removedOutbox, tasks: removedTasks };
 }
 
 export function pendingOutbox(state) {
