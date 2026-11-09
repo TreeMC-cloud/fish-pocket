@@ -28,7 +28,9 @@ concurrency:
 
 jobs:
   package:
-    runs-on: macos-26
+    # macos-26 的池子很小：实测排队 15 分钟没分到机器就被取消了，
+    # runner_name 一直为空说明从没被调度。macos-15 池子大得多，通常 1-2 分钟就能起。
+    runs-on: macos-15
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v5
