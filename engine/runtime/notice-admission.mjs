@@ -37,6 +37,14 @@ const THROTTLED = new Set([
   'repeat',
   'compaction',
   'dispatch',
+  // 场景没配 / 配得不对：用户需要知道，但它每轮都会成立，
+  // 不冷却会变成每轮弹一次。放高频类而不是 ALWAYS——
+  // 「该配场景了」是提醒，不是出事。
+  //
+  // 这两个曾经两个名单都不在，于是被准入器静默丢弃：
+  // auto-guard 以为发出去了，用户永远看不到，engine.log 里只有一行。
+  'scene_missing',
+  'scene_mismatch',
 ]);
 
 export function createNoticeAdmission({ cooldownMs = 10 * 60_000, now = Date.now } = {}) {
