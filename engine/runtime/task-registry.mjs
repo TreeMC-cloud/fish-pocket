@@ -208,7 +208,7 @@ function idempotencyKey(source, eventId, fallback) {
  * （调用方要能分辨：`created: false` 表示这次是重投）。
  */
 export function create(state, input, now = Date.now()) {
-  const { source, eventId, title, sceneId = null, parentTaskId = null, threadKey = null, approval = 'none', note = null, acceptance = null } = input ?? {};
+  const { source, eventId, title, sceneId = null, parentTaskId = null, threadKey = null, approval = 'none', note = null, acceptance = null, verify = null } = input ?? {};
   if (!title || !String(title).trim()) throw new TaskError('建任务必须给 title', 'usage');
 
   const key = idempotencyKey(source, eventId, null);
@@ -234,6 +234,11 @@ export function create(state, input, now = Date.now()) {
     acceptance: acceptance == null ? null : String(acceptance).slice(0, 2000),
     /** 自检结果：null 未评 / 'pass' / 'fail'。由 turn/end 解析 ACCEPT 标记写入。 */
     acceptanceResult: null,
+    // 独立验证命令：引擎自己再跑一遍，不信模型的自我报告。
+    // 只认任务里显式声明的，不做推测（推测出来的命令跑错了更麻烦）。
+    verify: Array.isArray(verify) ? verify.filter((c) => typeof c === 'string' && c.trim()).slice(0, 3) : null,
+    /** 验证结果：[{cmd, ok, exitCode, output}]，null 表示还没跑。 */
+    verifyResults: null,
     status: 'received',
     owner: 'router',
     createdAt: now,
