@@ -106,12 +106,19 @@ final class Diagnostics {
         // 服务器现在同时不再提供 TLS，所以这个地址已经用不了——
         // 不改的话，用户升级后仍然打到 https 上，继续报同样的错，
         // 而设置页里那串地址看着"没变"，很难想到要手动改。
+        // 注意：这里必须先算到局部变量再赋值。
+        // `endpoint` 带 didSet 观察器，而 `defaults.set(endpoint, ...)` 是**读取**
+        // self.endpoint —— 在 init 里所有存储属性就位之前读它，编译器直接拒绝
+        // （"'self' used in property access 'endpoint' before all stored properties
+        // are initialized"）。上一版就是这么挂掉一次构建的。
+        let resolvedEndpoint: String
         if let stored = storedEndpoint, stored.hasPrefix("https://202.189.51.44") {
-            endpoint = stored.replacingOccurrences(of: "https://202.189.51.44", with: "http://202.189.51.44")
-            defaults.set(endpoint, forKey: Keys.endpoint)
+            resolvedEndpoint = stored.replacingOccurrences(of: "https://202.189.51.44", with: "http://202.189.51.44")
+            defaults.set(resolvedEndpoint, forKey: Keys.endpoint)
         } else {
-            endpoint = storedEndpoint ?? Self.defaultEndpoint
+            resolvedEndpoint = storedEndpoint ?? Self.defaultEndpoint
         }
+        endpoint = resolvedEndpoint
         token = defaults.string(forKey: Keys.token) ?? Self.defaultToken
         cursor = UInt64(defaults.integer(forKey: Keys.cursor))
         sentBatches = defaults.integer(forKey: Keys.sentBatches)
