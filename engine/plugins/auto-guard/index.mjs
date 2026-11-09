@@ -665,6 +665,14 @@ ctx.effect(() => {
   }
 
   onTurnStart(session, event) {
+    // 记下最近的用户会话：主动层要派活，总得知道派给谁。
+    // 放在 turn/start 而不是 turn/end——否则开机后第一轮结束前，
+    // 主动层拿不到任何会话，「自己派活」这条永远不触发。
+    try {
+      if (String(session?.header?.origin ?? '') !== 'subagent') {
+        this.lastSessionId = sessionId(session);
+      }
+    } catch { /* 记不下就算了 */ }
     const s = this.runtime(session);
     s.turns += 1;
 
@@ -1058,9 +1066,7 @@ ctx.effect(() => {
       const reason = event?.data?.reason?.kind;
       // 记忆插件自己发的内省轮次不算工作，记进来会污染统计。
       if (String(session?.header?.origin ?? '') === 'subagent') return;
-      // 记下最近的用户会话：主动层要派活，总得知道派给谁。
-      // 只认用户会话——派给子代理会自己套自己。
-      this.lastSessionId = sessionId(session);
+
 
       // 技能效果：本轮加载过的技能，配上这一轮的真实结果。
       //   completed → 成功（ok=true）
